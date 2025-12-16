@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ms-swift-cache-pvc
+  labels:
+    app: ms-swift
+    tier: storage
+spec:
+  # Use rook-ceph-block for cache - optimized for many small files
+  # (HuggingFace models, datasets, pip cache)
+  storageClassName: rook-ceph-block
+  accessModes:
+    - ReadWriteOnce  # Single-node access sufficient for cache
+  resources:
+    requests:
+      storage: 300Gi

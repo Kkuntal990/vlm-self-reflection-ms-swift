@@ -1,0 +1,113 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qwen3-8b-sft-job
+  labels:
+    app: ms-swift
+    model: qwen3-8b
+    task: sft
+spec:
+  # Don't retry on failure - let user investigate logs
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        model: qwen3-8b
+        task: sft
+    spec:
+      restartPolicy: Never
+
+      # Optional: Uncomment to pin to specific GPU nodes
+      # nodeSelector:
+      #   gpu: "true"
+      #   node.kubernetes.io/instance-type: gpu-node
+
+      # Optional: Uncomment for node affinity (ensure both GPUs on same node)
+      # affinity:
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #       - matchExpressions:
+      #         - key: nvidia.com/gpu.count
+      #           operator: Gte
+      #           values:
+      #           - "2"
+
+      containers:
+      - name: ms-swift-trainer
+        # TODO: Replace with your Docker Hub username
+        image: kkokate990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command: ["/bin/bash", "/workspace/scripts/run_sft_ddp.sh"]
+
+        # Environment variables for training configuration
+        env:
+        # HuggingFace token (optional for public models)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Model and dataset configuration
+        - name: MODEL_ID
+          value: "Qwen/Qwen3-8B"
+        - name: DATASET_ID
+          value: "AI-ModelScope/alpaca-gpt4-data-en#500"  # Smoke test: 500 samples
+
+        # Training hyperparameters
+        - name: MAX_LEN
+          value: "2048"
+        - name: BATCH
+          value: "1"
+        - name: GRAD_ACC
+          value: "16"
+        - name: EPOCHS
+          value: "1"
+        - name: LR
+          value: "2e-4"
+        - name: LORA_RANK
+          value: "8"
+        - name: LORA_ALPHA
+          value: "16"
+
+        # DDP configuration
+        - name: NPROC
+          value: "2"
+        - name: MASTER_PORT
+          value: "29501"
+
+        # Debugging (set to INFO for troubleshooting)
+        - name: NCCL_DEBUG
+          value: "WARN"
+
+        resources:
+          requests:
+            nvidia.com/gpu: "2"
+            memory: "32Gi"
+            cpu: "8"
+          limits:
+            nvidia.com/gpu: "2"
+            memory: "32Gi"
+            cpu: "8"
+
+        volumeMounts:
+        # Cache PVC (rook-ceph-block) for HF models, datasets, pip cache
+        - name: cache-volume
+          mountPath: /cache
+
+        # Outputs PVC (rook-cephfs) for checkpoints and model weights
+        - name: outputs-volume
+          mountPath: /outputs
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc

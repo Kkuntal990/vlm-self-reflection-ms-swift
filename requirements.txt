@@ -1,0 +1,9 @@
+# Core dependencies for ms-swift fine-tuning
+ms-swift
+transformers>=4.51.0
+torch>=2.0.0
+datasets
+accelerate
+tensorboard
+sentencepiece
+protobuf

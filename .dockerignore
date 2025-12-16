@@ -1,0 +1,50 @@
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Kubernetes manifests (not needed in container)
+k8s/
+
+# Documentation
+*.md
+README.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+venv/
+env/
+ENV/
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+
+# Plan files
+.claude/
