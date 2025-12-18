@@ -2,42 +2,12 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: qwen3-8b-sft-job
-  labels:
-    app: ms-swift
-    model: qwen3-8b
-    task: sft
 spec:
-  # Don't retry on failure - let user investigate logs
-  backoffLimit: 0
   template:
-    metadata:
-      labels:
-        app: ms-swift
-        model: qwen3-8b
-        task: sft
     spec:
-      restartPolicy: Never
-
-      # Optional: Uncomment to pin to specific GPU nodes
-      # nodeSelector:
-      #   gpu: "true"
-      #   node.kubernetes.io/instance-type: gpu-node
-
-      # Optional: Uncomment for node affinity (ensure both GPUs on same node)
-      # affinity:
-      #   nodeAffinity:
-      #     requiredDuringSchedulingIgnoredDuringExecution:
-      #       nodeSelectorTerms:
-      #       - matchExpressions:
-      #         - key: nvidia.com/gpu.count
-      #           operator: Gte
-      #           values:
-      #           - "2"
-
       containers:
       - name: ms-swift-trainer
-        # TODO: Replace with your Docker Hub username
-        image: kkokate990/ms-swift-qwen:latest
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
         imagePullPolicy: Always
 
         command: ["/bin/bash", "/workspace/scripts/run_sft_ddp.sh"]
@@ -56,7 +26,7 @@ spec:
         - name: MODEL_ID
           value: "Qwen/Qwen3-8B"
         - name: DATASET_ID
-          value: "AI-ModelScope/alpaca-gpt4-data-en#500"  # Smoke test: 500 samples
+          value: "tatsu-lab/alpaca#500"  # Smoke test: 500 samples
 
         # Training hyperparameters
         - name: MAX_LEN
@@ -87,27 +57,44 @@ spec:
         resources:
           requests:
             nvidia.com/gpu: "2"
-            memory: "32Gi"
-            cpu: "8"
+            memory: "16Gi"
+            cpu: "4"
           limits:
             nvidia.com/gpu: "2"
-            memory: "32Gi"
-            cpu: "8"
+            memory: "16Gi"
+            cpu: "4"
 
         volumeMounts:
-        # Cache PVC (rook-ceph-block) for HF models, datasets, pip cache
         - name: cache-volume
           mountPath: /cache
-
-        # Outputs PVC (rook-cephfs) for checkpoints and model weights
         - name: outputs-volume
           mountPath: /outputs
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      restartPolicy: Never
+
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: NotIn
+                values:
+                - NVIDIA-A100-SXM4-40GB
+                - NVIDIA-A100-SXM4-80GB
+                - NVIDIA-A100-PCIE-40GB
+                - NVIDIA-A100-80GB-PCIe
 
       volumes:
       - name: cache-volume
         persistentVolumeClaim:
           claimName: ms-swift-cache-pvc
-
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi

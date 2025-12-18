@@ -20,11 +20,11 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 &
 # Upgrade pip
 RUN python -m pip install --upgrade pip setuptools wheel
 
-# Install PyTorch with CUDA 12.1 support
+# Install PyTorch 2.2+ with CUDA 12.1 support (required for transformers>=4.51)
 RUN pip install --no-cache-dir \
-    torch==2.1.0 \
-    torchvision==0.16.0 \
-    torchaudio==2.1.0 \
+    torch==2.2.0 \
+    torchvision==0.17.0 \
+    torchaudio==2.2.0 \
     --index-url https://download.pytorch.org/whl/cu121
 
 # Copy requirements and install Python dependencies

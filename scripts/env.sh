@@ -14,6 +14,10 @@ export PIP_CACHE_DIR=/cache/pip
 # Optimized for large files (checkpoints, model weights)
 export OUTPUT_DIR=/outputs
 
+# Performance optimization: Copy model to RAM disk for faster loading
+# Set to "true" to enable (requires sufficient /dev/shm size)
+export USE_RAM_CACHE=${USE_RAM_CACHE:-false}
+
 # DDP and NCCL settings for single-node multi-GPU training
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export CUDA_DEVICE_MAX_CONNECTIONS=1
