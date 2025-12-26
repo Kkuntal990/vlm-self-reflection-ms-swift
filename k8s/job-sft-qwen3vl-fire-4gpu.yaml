@@ -1,0 +1,161 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qwen3vl-32b-fire-bc-job
+  labels:
+    app: ms-swift
+    task: fire-behavior-cloning
+    model: qwen3-vl-32b
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: fire-behavior-cloning
+        model: qwen3-vl-32b
+    spec:
+      containers:
+      - name: ms-swift-trainer
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        # Training only (assumes preprocessed data exists)
+        # Run job-preprocess-fire-cpu.yaml first to create the dataset
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "FIRE Behavior Cloning Training"
+          echo "Offline Imitation Learning for Qwen3-VL-32B"
+          echo "========================================="
+          echo ""
+
+          # Verify preprocessed data exists
+          if [ ! -f /outputs/fire_bc/fire_bc_train.jsonl ]; then
+            echo "ERROR: Preprocessed data not found!"
+            echo "Expected: /outputs/fire_bc/fire_bc_train.jsonl"
+            echo ""
+            echo "Please run preprocessing first:"
+            echo "  kubectl apply -f k8s/job-preprocess-fire-cpu.yaml"
+            echo ""
+            exit 1
+          fi
+
+          echo "Found preprocessed data:"
+          ls -lh /outputs/fire_bc/
+          wc -l /outputs/fire_bc/fire_bc_*.jsonl
+          echo ""
+
+          # Start training
+          echo "Starting training..."
+          echo ""
+          /workspace/scripts/run_sft_qwen3vl_fire_4gpu.sh
+
+        env:
+        # HuggingFace token (required for gated models)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Model configuration
+        - name: MODEL_ID
+          value: "Qwen/Qwen3-VL-32B-Instruct"
+        - name: DATASET_PATH
+          value: "/outputs/fire_bc/fire_bc_train.jsonl"
+        - name: VAL_DATASET_PATH
+          value: "/outputs/fire_bc/fire_bc_test.jsonl"
+
+        # Sequence configuration
+        - name: MAX_LEN
+          value: "8192"
+        - name: IMAGE_MAX_TOKEN_NUM
+          value: "2048"
+
+        # Training hyperparameters (tuned for 32B model on 4xA100)
+        - name: BATCH
+          value: "1"
+        - name: GRAD_ACC
+          value: "16"
+        - name: EPOCHS
+          value: "1"
+        - name: LR
+          value: "1e-4"
+        - name: WARMUP_RATIO
+          value: "0.05"
+
+        # LoRA configuration
+        - name: LORA_RANK
+          value: "32"
+        - name: LORA_ALPHA
+          value: "64"
+
+        # DDP configuration
+        - name: NPROC
+          value: "4"
+
+        # Output configuration
+        - name: RUN_NAME
+          value: "qwen3vl-32b-fire-bc"
+
+        # Logging configuration
+        - name: LOGGING_STEPS
+          value: "10"
+        - name: EVAL_STEPS
+          value: "500"
+        - name: SAVE_STEPS
+          value: "500"
+
+        resources:
+          requests:
+            nvidia.com/a100: "4"
+            memory: "128Gi"
+            cpu: "32"
+          limits:
+            nvidia.com/a100: "4"
+            memory: "256Gi"
+            cpu: "64"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      restartPolicy: Never
+
+      tolerations:
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - NVIDIA-A100-SXM4-80GB
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      # Increased shared memory for 32B model with 4 GPUs
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Gi

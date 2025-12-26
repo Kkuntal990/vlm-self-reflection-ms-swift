@@ -69,10 +69,9 @@ spec:
       restartPolicy: Never
 
       tolerations:
-    # Tolerate reserved nodes
-    - key: nautilus.io/reservation
-      operator: Exists
-      effect: NoSchedule
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
 
       affinity:
         nodeAffinity:

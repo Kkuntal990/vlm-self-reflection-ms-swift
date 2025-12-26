@@ -1,0 +1,119 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fire-preprocess-cpu-job
+  labels:
+    app: ms-swift
+    task: fire-preprocessing
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: fire-preprocessing
+    spec:
+      containers:
+      - name: fire-preprocessor
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "FIRE Dataset Preprocessing (CPU-only)"
+          echo "Behavior Cloning Format Conversion"
+          echo "========================================="
+          echo ""
+          echo "Dataset: ${DATASET_ID}"
+          echo "Splits: train test"
+          echo "Max samples: ${MAX_SAMPLES} (0 = all)"
+          echo "Max history rounds: ${MAX_HISTORY_ROUNDS}"
+          echo ""
+
+          # Run preprocessing
+          python /workspace/scripts/prepare_fire_full_state_jsonl.py \
+            --dataset_id "${DATASET_ID}" \
+            --output_dir /outputs/fire_bc \
+            --image_dir /cache/fire_images \
+            --max_samples ${MAX_SAMPLES} \
+            --max_history_rounds ${MAX_HISTORY_ROUNDS} \
+            --splits train test \
+            --streaming
+
+          echo ""
+          echo "========================================="
+          echo "Preprocessing Complete"
+          echo "========================================="
+          echo ""
+          echo "Output files:"
+          ls -lh /outputs/fire_bc/
+          echo ""
+          echo "Sample counts:"
+          wc -l /outputs/fire_bc/fire_bc_*.jsonl
+          echo ""
+          echo "Statistics:"
+          cat /outputs/fire_bc/stats.json
+          echo ""
+          echo "First training example:"
+          head -1 /outputs/fire_bc/fire_bc_train.jsonl | python -m json.tool
+          echo ""
+          echo "Ready for training! Submit job-sft-qwen3vl-fire-4gpu.yaml"
+          echo "========================================="
+
+        env:
+        # HuggingFace token (optional for public datasets)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Dataset configuration
+        - name: DATASET_ID
+          value: "PengxiangLi/FIRE"
+
+        # Preprocessing configuration
+        - name: MAX_SAMPLES
+          value: "0"  # 0 = all samples; set to "100" for quick testing
+        - name: MAX_HISTORY_ROUNDS
+          value: "6"  # Max history rounds in state (context control)
+
+        resources:
+          requests:
+            memory: "32Gi"
+            cpu: "16"
+          limits:
+            memory: "64Gi"
+            cpu: "32"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+
+      restartPolicy: Never
+
+      # Optional: prefer non-GPU nodes for cost savings
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: DoesNotExist
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc

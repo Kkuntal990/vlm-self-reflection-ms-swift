@@ -19,11 +19,15 @@ This project provides a production-ready setup for fine-tuning Qwen3-8B using:
 ├── .dockerignore                       # Build optimization
 ├── scripts/
 │   ├── env.sh                         # Environment configuration
-│   └── run_sft_ddp.sh                 # Main training script
+│   ├── run_sft_ddp.sh                 # 2-GPU DDP training (Qwen3-8B)
+│   ├── run_sft_qwen3vl_fire_4gpu.sh  # 4-GPU FIRE behavior cloning (Qwen3-VL-32B)
+│   └── prepare_fire_full_state_jsonl.py  # FIRE dataset preprocessing
 ├── k8s/
 │   ├── pvc-cache.yaml                 # rook-ceph-block for cache
 │   ├── pvc-outputs.yaml               # rook-cephfs for checkpoints
-│   ├── job-sft-qwen3-8b-2gpu.yaml    # Kubernetes Job manifest
+│   ├── job-sft-qwen3-8b-2gpu.yaml    # 2-GPU Qwen3-8B Job
+│   ├── job-preprocess-fire-cpu.yaml   # CPU-only FIRE preprocessing Job
+│   ├── job-sft-qwen3vl-fire-4gpu.yaml # 4-GPU FIRE behavior cloning Job
 │   └── secret-hf-token.yaml.template  # HuggingFace token template
 └── README.md                           # This file
 ```
@@ -127,7 +131,7 @@ kubectl apply -f k8s/job-sft-qwen3-8b-2gpu.yaml
 #### Run  jupyter job for debugging
 
 1. use `kubectl apply -f k8s/jupyter-2gpu-test.yaml`
-2. `kubectl exec -it vlm-jupyter -- /bin/bash`
+2. `kubectl exec -it vlm-jupyter --bash`
 3. `pip install jupyter jupyterlab ipywidgets`
 4. `jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root \                                                                              --ServerApp.token='medvae2024' --ServerApp.password=''`
 5. Now in your local terminal - `kubectl port-forward vlm-jupyter 8888:8888`
@@ -295,6 +299,135 @@ If you have GPUs with limited VRAM:
 - name: LORA_RANK
   value: "4"   # Reduced from 8
 ```
+
+## FIRE Full-State Imitation Learning (Qwen3-VL-32B)
+
+This trains Qwen3-VL-32B using **offline imitation learning (behavior cloning)** on full reflection trajectories from the [FIRE dataset](https://huggingface.co/datasets/PengxiangLi/FIRE), following the RePer paradigm.
+
+### Learning Paradigm
+
+This is NOT standard final-answer SFT. It is trajectory-level behavior cloning where:
+
+- **State** = (image, question, all previous attempts, all previous feedback)
+- **Action** = next student response
+- **Loss** = cross-entropy on expert action given state
+
+Each timestep in the trajectory becomes a separate training example, teaching the model to iteratively refine its answers based on feedback.
+
+### Step 1: Dataset Preprocessing (CPU-only)
+
+**Important:** FIRE dataset only contains image paths. The actual images must be downloaded from the [COCO dataset](https://cocodataset.org/). The preprocessing script automatically downloads needed images from HuggingFace's COCO dataset.
+
+#### Local Testing (without images)
+
+Test the preprocessing logic locally without downloading COCO images:
+
+```bash
+# Test with 10 samples (uses placeholder image paths)
+./scripts/test_fire_preprocessing.sh
+
+# Or run directly with --skip-images flag
+python scripts/prepare_fire_full_state_jsonl.py \
+  --output_dir ./test_outputs \
+  --image_dir ./test_images \
+  --max_samples 10 \
+  --splits train \
+  --skip-images
+```
+
+#### Cluster Preprocessing (with real images)
+
+Convert FIRE trajectories to behavior cloning format using CPU-only nodes (no GPU needed):
+
+```bash
+# Submit preprocessing job (CPU-only, cost-effective)
+kubectl apply -f k8s/job-preprocess-fire-cpu.yaml
+
+# Monitor progress
+kubectl logs -f job/fire-preprocess-cpu-job
+
+# Check completion
+kubectl get job fire-preprocess-cpu-job
+```
+
+**For quick testing with 100 samples:**
+
+Edit `k8s/job-preprocess-fire-cpu.yaml` and change:
+
+```yaml
+- name: MAX_SAMPLES
+  value: "100"  # Change from "0"
+```
+
+**Output files:**
+
+- `/outputs/fire_bc/fire_bc_train.jsonl` - Training examples (~367K from 105K trajectories)
+- `/outputs/fire_bc/fire_bc_test.jsonl` - Test examples (~38K from 11K trajectories)
+- `/outputs/fire_bc/stats.json` - Processing statistics
+- `/cache/fire_images/{split}/` - Extracted images (~23GB total)
+
+**Preprocessing time estimates:**
+
+- Local testing with `--skip-images`: seconds
+- 100 samples (with images): ~30-60 minutes (COCO download + processing)
+- Full dataset (116K samples): ~4-6 hours (first run with COCO download)
+
+**Note:** The first run requires downloading COCO images from HuggingFace, which is time-consuming. The preprocessing script searches through ~118K COCO images to find matches for FIRE samples. Subsequent runs will be faster if COCO is cached.
+
+### Step 2: Training (4×A100 80GB)
+
+After preprocessing completes, submit the GPU training job:
+
+```bash
+# Submit training job (requires preprocessed data)
+kubectl apply -f k8s/job-sft-qwen3vl-fire-4gpu.yaml
+
+# Monitor progress
+kubectl logs -f job/qwen3vl-32b-fire-bc-job
+
+# Check status
+kubectl get job qwen3vl-32b-fire-bc-job
+```
+
+**Note:** Training job will fail if preprocessing hasn't completed. Verify data exists:
+
+```bash
+kubectl exec -it <preprocessing-pod> -- ls -lh /outputs/fire_bc/
+```
+
+### Configuration
+
+**Preprocessing job** (`k8s/job-preprocess-fire-cpu.yaml`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_SAMPLES` | `0` (all) | Samples to preprocess (0 = all) |
+| `MAX_HISTORY_ROUNDS` | `6` | Max history rounds in state |
+
+**Training job** (`k8s/job-sft-qwen3vl-fire-4gpu.yaml`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BATCH` | `1` | Per-GPU batch size (reduced for 32B) |
+| `GRAD_ACC` | `16` | Gradient accumulation |
+| `LR` | `1e-4` | Learning rate |
+| `LORA_RANK` | `32` | LoRA rank |
+| `MAX_LEN` | `8192` | Max sequence length |
+| `IMAGE_MAX_TOKEN_NUM` | `2048` | Image token budget |
+
+**Effective batch size** = 1 × 16 × 4 GPUs = 64
+
+### Checkpoints
+
+Saved to: `/outputs/qwen3vl-32b-fire-bc/`
+
+To merge LoRA weights for inference:
+
+```bash
+swift merge --model Qwen/Qwen3-VL-32B-Instruct --adapter /outputs/qwen3vl-32b-fire-bc
+```
+
+---
 
 ## Performance Tips
 

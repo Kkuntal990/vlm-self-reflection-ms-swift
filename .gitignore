@@ -1,0 +1,57 @@
+# HuggingFace token secret (contains sensitive credentials)
+k8s/secret-hf-token.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local development
+.env
+.env.local
+
+# Output directories (if run locally)
+outputs/
+cache/
+test_fire_local/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb

@@ -8,6 +8,10 @@ sentencepiece
 protobuf
 numpy<2.0.0
 
+# Image processing for FIRE dataset preprocessing
+pillow
+tqdm
+
 # Jupyter for interactive development
 jupyter
 jupyterlab
