@@ -47,20 +47,14 @@ spec:
         # DDP configuration
         - name: NPROC
           value: "2"
-        - name: MASTER_PORT
-          value: "29501"
-
-        # Debugging (set to INFO for troubleshooting)
-        - name: NCCL_DEBUG
-          value: "WARN"
 
         resources:
           requests:
-            nvidia.com/gpu: "2"
+            nvidia.com/a100: "2"
             memory: "16Gi"
             cpu: "4"
           limits:
-            nvidia.com/gpu: "2"
+            nvidia.com/a100: "2"
             memory: "16Gi"
             cpu: "4"
 
@@ -74,18 +68,21 @@ spec:
 
       restartPolicy: Never
 
+      tolerations:
+    # Tolerate reserved nodes
+    - key: nautilus.io/reservation
+      operator: Exists
+      effect: NoSchedule
+
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
               - key: nvidia.com/gpu.product
-                operator: NotIn
+                operator: In
                 values:
-                - NVIDIA-A100-SXM4-40GB
                 - NVIDIA-A100-SXM4-80GB
-                - NVIDIA-A100-PCIE-40GB
-                - NVIDIA-A100-80GB-PCIe
 
       volumes:
       - name: cache-volume

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: vlm-jupyter
+  name: vlm-jupyter-1gpu
 spec:
   restartPolicy: Never
   containers:
@@ -11,13 +11,13 @@ spec:
 
     resources:
       limits:
-        nvidia.com/a100: "2"
+        nvidia.com/a100: "1"
         memory: "16Gi"
-        cpu: "4"
+        cpu: "2"
       requests:
-        nvidia.com/a100: "2"
+        nvidia.com/a100: "1"
         memory: "16G"
-        cpu: "4"
+        cpu: "2"
 
 
     volumeMounts:
@@ -70,10 +70,6 @@ spec:
       value: "8"
     - name: LORA_ALPHA
       value: "16"
-
-    # DDP configuration
-    - name: NPROC
-      value: "2"
 
     # Python and CUDA settings
     - name: PYTHONUNBUFFERED

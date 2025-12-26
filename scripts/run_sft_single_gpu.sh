@@ -15,8 +15,6 @@ LR="${LR:-2e-4}"
 LORA_RANK="${LORA_RANK:-8}"
 LORA_ALPHA="${LORA_ALPHA:-16}"
 LORA_DROPOUT="${LORA_DROPOUT:-0.05}"
-PORT="${MASTER_PORT:-29501}"
-NPROC="${NPROC:-2}"
 
 # Auto-detect optimal dtype (bf16 if supported, else fp16)
 DTYPE="${DTYPE:-auto}"
@@ -34,14 +32,14 @@ python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available';
 mkdir -p "${OUTPUT_DIR}/qwen3-8b-sft"
 
 echo "========================================="
-echo "Starting 2-GPU DDP Training"
+echo "Starting Single GPU Training"
 echo "========================================="
 echo "Model: ${MODEL_ID}"
 echo "Dataset: ${DATASET_ID}"
 echo "Max Length: ${MAX_LEN}"
-echo "Batch Size per GPU: ${BATCH}"
+echo "Batch Size: ${BATCH}"
 echo "Gradient Accumulation: ${GRAD_ACC}"
-echo "Effective Batch Size: $((BATCH * GRAD_ACC * NPROC))"
+echo "Effective Batch Size: $((BATCH * GRAD_ACC))"
 echo "Epochs: ${EPOCHS}"
 echo "Learning Rate: ${LR}"
 echo "Dtype: ${DTYPE}"
@@ -49,11 +47,8 @@ echo "LoRA Rank: ${LORA_RANK}"
 echo "Output Dir: ${OUTPUT_DIR}/qwen3-8b-sft"
 echo "========================================="
 
-# Launch distributed training with torchrun
-torchrun \
-    --nproc_per_node="${NPROC}" \
-    --master_port="${PORT}" \
-    $(which swift) sft \
+# Launch single GPU training with swift directly
+swift sft \
     --model "${MODEL_ID}" \
     --train_type lora \
     --dataset "${DATASET_ID}" \

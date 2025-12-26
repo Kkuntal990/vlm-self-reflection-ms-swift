@@ -127,7 +127,7 @@ kubectl apply -f k8s/job-sft-qwen3-8b-2gpu.yaml
 #### Run  jupyter job for debugging
 
 1. use `kubectl apply -f k8s/jupyter-2gpu-test.yaml`
-2. `kubectl exec -it vlm-jupyter --/bin/bash`
+2. `kubectl exec -it vlm-jupyter -- /bin/bash`
 3. `pip install jupyter jupyterlab ipywidgets`
 4. `jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root \                                                                              --ServerApp.token='medvae2024' --ServerApp.password=''`
 5. Now in your local terminal - `kubectl port-forward vlm-jupyter 8888:8888`

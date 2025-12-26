@@ -1,31 +1,26 @@
 #!/usr/bin/env bash
-# Environment configuration for ms-swift training
-# This script sets up cache and output directories optimized for dual-PVC setup
 
 # Cache PVC (rook-ceph-block) - mounted at /cache
-# Optimized for many small files (HuggingFace models, datasets, pip cache)
 export HF_HOME=/cache/hf
+export HF_HUB_CACHE=/cache/hf/hub
 export TRANSFORMERS_CACHE=/cache/hf/transformers
 export HF_DATASETS_CACHE=/cache/hf/datasets
 export TORCH_HOME=/cache/torch
 export PIP_CACHE_DIR=/cache/pip
 
 # Outputs PVC (rook-cephfs) - mounted at /outputs
-# Optimized for large files (checkpoints, model weights)
 export OUTPUT_DIR=/outputs
 
-# Performance optimization: Copy model to RAM disk for faster loading
-# Set to "true" to enable (requires sufficient /dev/shm size)
-export USE_RAM_CACHE=${USE_RAM_CACHE:-false}
+# Make cached runs deterministic (enable once model is fully cached)
+# export TRANSFORMERS_OFFLINE=1
+# export HF_DATASETS_OFFLINE=1
+export HF_HUB_DISABLE_TELEMETRY=1
 
-# DDP and NCCL settings for single-node multi-GPU training
+# DDP / NCCL
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
-export CUDA_DEVICE_MAX_CONNECTIONS=1
-
-# Distributed training configuration
 export MASTER_ADDR=${MASTER_ADDR:-localhost}
 export MASTER_PORT=${MASTER_PORT:-29501}
 
-# Optional: Uncomment for additional debugging
+# Debug toggles (enable when needed)
 # export NCCL_DEBUG_SUBSYS=ALL
 # export TORCH_DISTRIBUTED_DEBUG=DETAIL
