@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
 """
-Prepare FIRE dataset for behavior cloning with ms-swift.
+Prepare FIRE dataset in ShareGPT format for ms-swift.
 
-This script implements offline imitation learning (behavior cloning) by converting
-FIRE dataset trajectories into ms-swift JSONL format where each timestep becomes
-a separate training example:
-
-    State = (image, question, all previous attempts, all previous feedback)
-    Action = next student answer
-    Loss  = cross-entropy on expert action given state
-
-This follows the RePer learning paradigm but with:
-    - Pre-logged trajectories from FIRE
-    - External critic (not trained)
-    - Offline training
+Converts FIRE multi-round student-teacher conversations into ShareGPT format:
+- Each FIRE sample becomes one multi-round conversation
+- Question starts as 'human' with <image> token
+- Student answers become 'gpt' responses
+- Teacher feedback becomes 'human' responses
+- Ignores thought and score fields
 
 Usage:
-    python scripts/prepare_fire_full_state_jsonl.py \\
-        --output_dir /outputs/fire_bc \\
-        --image_dir /cache/fire_images \\
-        --max_samples 0 \\
-        --max_history_rounds 6 \\
-        --splits train test \\
+    python scripts/prepare_fire_sharegpt.py \
+        --output_dir /outputs/fire_sharegpt \
+        --image_dir /cache/fire_images \
+        --max_samples 0 \
+        --splits train test \
         --streaming
 """
 
@@ -33,7 +26,10 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
+
+# Set HuggingFace download timeout to avoid network issues
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")  # 5 minutes
 
 from datasets import load_dataset
 from PIL import Image
@@ -46,15 +42,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Default system prompt - can be customized via command line or by editing here
+DEFAULT_SYSTEM_PROMPT = ""
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Convert FIRE dataset to ms-swift behavior cloning format"
+        description="Convert FIRE dataset to ShareGPT format for ms-swift"
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="/outputs/fire_bc",
+        default="/outputs/fire_sharegpt",
         help="Directory for output JSONL files",
     )
     parser.add_argument(
@@ -68,12 +67,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Maximum samples to process per split (0 = all)",
-    )
-    parser.add_argument(
-        "--max_history_rounds",
-        type=int,
-        default=6,
-        help="Maximum history rounds to include in state (for context length control)",
     )
     parser.add_argument(
         "--splits",
@@ -103,6 +96,12 @@ def parse_args() -> argparse.Namespace:
         "--skip-images",
         action="store_true",
         help="Skip image processing (for testing FIRE parsing logic only)",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        type=str,
+        default=DEFAULT_SYSTEM_PROMPT,
+        help=f"System prompt to include in each conversation (default: '{DEFAULT_SYSTEM_PROMPT}')",
     )
     return parser.parse_args()
 
@@ -174,7 +173,7 @@ def extract_question_text(question) -> str:
     """Extract clean question text from FIRE question field.
 
     The FIRE dataset stores questions as dicts with 'value' key,
-    and may include <image> tokens which we handle separately.
+    and may include <image> tokens which we preserve for ShareGPT format.
     """
     if isinstance(question, dict) and "value" in question:
         text = question["value"]
@@ -183,48 +182,114 @@ def extract_question_text(question) -> str:
     else:
         text = str(question)
 
-    # Remove <image> token if present (we add it in state construction)
-    text = text.replace("<image>", "").strip()
-    return text
+    return text.strip()
 
 
-def parse_fire_to_bc_examples(
+def extract_answer_from_response(response_value: str) -> str:
+    """Extract answer from student response, ignoring thought.
+
+    Student responses in FIRE format look like:
+    'Thought: ...\nAnswer: ...\n\n'
+
+    We only want the Answer part.
+    """
+    if not response_value:
+        return ""
+
+    # Split by "Answer:" and take everything after it
+    if "Answer:" in response_value:
+        parts = response_value.split("Answer:", 1)
+        answer = parts[1].strip()
+        return answer
+
+    # If no "Answer:" marker, return as is
+    return response_value.strip()
+
+
+def extract_feedback_text(feedback_value: str) -> str:
+    """Extract feedback text and prepend score information.
+
+    Teacher feedback in FIRE format looks like:
+    'Score: 6.\nFeedback: ...\n'
+
+    We extract the score and feedback, then format as:
+    'A score of 6 is given to the answer. ...'
+    """
+    if not feedback_value:
+        return ""
+
+    score = None
+    feedback = ""
+
+    # Extract score
+    if "Score:" in feedback_value:
+        score_part = feedback_value.split("Score:", 1)[1]
+        # Extract the number (handle formats like "Score: 6." or "Score: 6")
+        score_str = score_part.split("\n")[0].strip().rstrip(".")
+        try:
+            score = int(score_str)
+        except ValueError:
+            # If score is not a simple integer, try to parse as float
+            try:
+                score = float(score_str)
+            except ValueError:
+                score = None
+
+    # Extract feedback
+    if "Feedback:" in feedback_value:
+        feedback = feedback_value.split("Feedback:", 1)[1].strip()
+    elif score is None:
+        # If no "Feedback:" marker and no score, return as is
+        return feedback_value.strip()
+
+    # Build final feedback with score prepended
+    if score is not None and feedback:
+        return f"A score of {score} is given to the answer. {feedback}"
+    elif feedback:
+        return feedback
+    else:
+        return feedback_value.strip()
+
+
+def parse_fire_to_sharegpt(
     sample: dict,
     sample_id: str,
     image_path: str,
-    max_history_rounds: int = 6,
-) -> list[dict]:
-    """Convert a single FIRE sample into multiple behavior cloning examples.
+    system_prompt: str = "",
+) -> dict | None:
+    """Convert a single FIRE sample into ShareGPT format.
 
-    This is the core function implementing the behavior cloning paradigm:
-    - For each timestep t, we construct state s_t from (image, question, history)
-    - The action a_t is the next student response
-    - Each (s_t, a_t) pair becomes one training example
+    ShareGPT format pairs human/assistant exchanges:
+    {
+        "system": "system prompt (optional)",
+        "conversation": [
+            {"human": "query1", "assistant": "response1"},
+            {"human": "query2", "assistant": "response2"}
+        ],
+        "images": ["/path/to/image.jpg"]
+    }
 
     Args:
         sample: FIRE dataset row containing question, image, conversations
         sample_id: Unique identifier for logging/debugging
         image_path: Absolute path to saved image file
-        max_history_rounds: Maximum (attempt, feedback) pairs to include in state
-                           (sliding window for context length control)
+        system_prompt: System prompt to include in the conversation
 
     Returns:
-        List of ms-swift format training examples, one per student response
+        ShareGPT format dict or None if parsing fails
     """
-    examples = []
     question_text = extract_question_text(sample.get("question", ""))
     conversations = sample.get("conversations", [])
 
     if not conversations:
         logger.debug(f"{sample_id}: No conversations found")
-        return examples
+        return None
 
     if not question_text:
         logger.warning(f"{sample_id}: Empty question text")
-        return examples
+        return None
 
-    # Parse conversations into (attempt, feedback) rounds
-    # FIRE format: alternating student responses and teacher feedback
+    # Parse student-teacher rounds into (question, answer) pairs
     rounds = []
     i = 0
     while i < len(conversations):
@@ -232,58 +297,56 @@ def parse_fire_to_bc_examples(
 
         # Expect student response
         if turn.get("role") == "student" and turn.get("type") == "response":
-            attempt = turn.get("value", "").strip()
-            feedback = None
+            response_value = turn.get("value", "")
+            answer = extract_answer_from_response(response_value)
 
-            # Check for following teacher feedback
-            if i + 1 < len(conversations):
-                next_turn = conversations[i + 1]
-                if (
-                    next_turn.get("role") == "teacher"
-                    and next_turn.get("type") == "feedback"
-                ):
-                    feedback = next_turn.get("value", "").strip()
-                    i += 1
+            if answer:
+                # Check for following teacher feedback
+                feedback = None
+                if i + 1 < len(conversations):
+                    next_turn = conversations[i + 1]
+                    if (
+                        next_turn.get("role") == "teacher"
+                        and next_turn.get("type") == "feedback"
+                    ):
+                        feedback_value = next_turn.get("value", "")
+                        feedback = extract_feedback_text(feedback_value)
+                        i += 1  # Skip the feedback turn
 
-            if attempt:  # Only add non-empty attempts
-                rounds.append((attempt, feedback))
+                rounds.append((answer, feedback))
+
         i += 1
 
     if not rounds:
-        logger.debug(f"{sample_id}: No valid rounds parsed from conversations")
-        return examples
+        logger.debug(f"{sample_id}: No valid rounds parsed")
+        return None
 
-    # Generate one training example per student response (timestep)
-    # This is the behavior cloning objective: predict action given state
-    for timestep, (current_attempt, _) in enumerate(rounds):
-        # Build state: <image> + question + history of (attempt, feedback) pairs
-        state_parts = [f"<image>\nQuestion:\n{question_text}"]
+    # Build ShareGPT conversation as paired exchanges
+    conversation = []
 
-        # Add history using sliding window if trajectory is long
-        history_start = max(0, timestep - max_history_rounds)
-        for h in range(history_start, timestep):
-            prev_attempt, prev_feedback = rounds[h]
-            attempt_num = h + 1
+    # First exchange: question -> first answer
+    conversation.append({
+        "human": question_text,
+        "assistant": rounds[0][0]
+    })
 
-            state_parts.append(f"\n\nAttempt {attempt_num}:\n{prev_attempt}")
-            if prev_feedback:
-                state_parts.append(f"\n\nFeedback {attempt_num}:\n{prev_feedback}")
+    # Subsequent exchanges: feedback -> next answer
+    for i in range(1, len(rounds)):
+        prev_feedback = rounds[i - 1][1]
+        current_answer = rounds[i][0]
 
-        state = "".join(state_parts)
-        action = current_attempt
+        if prev_feedback:  # Only add if there was feedback
+            conversation.append({
+                "human": prev_feedback,
+                "assistant": current_answer
+            })
 
-        # ms-swift JSONL format for multimodal SFT
-        examples.append(
-            {
-                "messages": [
-                    {"role": "user", "content": state},
-                    {"role": "assistant", "content": action},
-                ],
-                "images": [image_path],
-            }
-        )
-
-    return examples
+    # Return ShareGPT format with system prompt and images field
+    return {
+        "system": system_prompt,
+        "conversation": conversation,
+        "images": [image_path]
+    }
 
 
 def process_split(
@@ -292,10 +355,10 @@ def process_split(
     output_dir: Path,
     image_dir: Path,
     max_samples: int,
-    max_history_rounds: int,
     streaming: bool,
     image_quality: int,
     skip_images: bool = False,
+    system_prompt: str = "",
 ) -> dict:
     """Process a single dataset split.
 
@@ -305,9 +368,10 @@ def process_split(
         output_dir: Directory for output JSONL
         image_dir: Directory for saved images
         max_samples: Maximum samples to process (0 = all)
-        max_history_rounds: Max history in state construction
         streaming: Whether to use HF streaming mode
         image_quality: JPEG quality for saved images
+        skip_images: Skip image processing for testing
+        system_prompt: System prompt to include in each conversation
 
     Returns:
         Dictionary of processing statistics
@@ -382,14 +446,13 @@ def process_split(
 
         logger.info(f"Found {len(coco_images)} images in COCO")
 
-    output_file = output_dir / f"fire_bc_{split}.jsonl"
+    output_file = output_dir / f"fire_sharegpt_{split}.jsonl"
     stats = {
         "split": split,
         "samples_processed": 0,
         "samples_skipped": 0,
         "samples_no_image": 0,
         "samples_no_conversations": 0,
-        "examples_generated": 0,
         "total_rounds": 0,
         "images_saved": 0,
         "errors": [],
@@ -441,25 +504,24 @@ def process_split(
 
                     stats["images_saved"] += 1
 
-                # Generate behavior cloning examples
-                examples = parse_fire_to_bc_examples(
-                    sample, sample_id, image_save_path, max_history_rounds
+                # Generate ShareGPT format
+                sharegpt_example = parse_fire_to_sharegpt(
+                    sample, sample_id, image_save_path, system_prompt
                 )
 
-                if not examples:
+                if not sharegpt_example:
                     stats["samples_skipped"] += 1
                     stats["samples_no_conversations"] += 1
                     if len(stats["errors"]) < 100:
                         stats["errors"].append(f"{sample_id}: No valid conversations")
                     continue
 
-                # Write examples to JSONL
-                for ex in examples:
-                    f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+                # Write to JSONL
+                f.write(json.dumps(sharegpt_example, ensure_ascii=False) + "\n")
 
                 stats["samples_processed"] += 1
-                stats["examples_generated"] += len(examples)
-                stats["total_rounds"] += len(examples)
+                # Count conversation rounds
+                stats["total_rounds"] += len(sharegpt_example["conversation"])
 
             except Exception as e:
                 stats["samples_skipped"] += 1
@@ -468,7 +530,7 @@ def process_split(
                 logger.warning(f"Error processing sample {idx}: {e}")
                 continue
 
-    logger.info(f"Wrote {stats['examples_generated']} examples to {output_file}")
+    logger.info(f"Wrote {stats['samples_processed']} conversations to {output_file}")
     return stats
 
 
@@ -479,12 +541,11 @@ def main():
     image_dir = Path(args.image_dir)
 
     logger.info("=" * 60)
-    logger.info("FIRE Behavior Cloning Dataset Preparation")
+    logger.info("FIRE ShareGPT Format Dataset Preparation")
     logger.info("=" * 60)
     logger.info(f"Dataset: {args.dataset_id}")
     logger.info(f"Splits: {args.splits}")
     logger.info(f"Max samples per split: {args.max_samples if args.max_samples > 0 else 'all'}")
-    logger.info(f"Max history rounds: {args.max_history_rounds}")
     logger.info(f"Streaming: {args.streaming}")
     logger.info(f"Output dir: {output_dir}")
     logger.info(f"Image dir: {image_dir}")
@@ -499,10 +560,10 @@ def main():
             output_dir=output_dir,
             image_dir=image_dir,
             max_samples=args.max_samples,
-            max_history_rounds=args.max_history_rounds,
             streaming=args.streaming,
             image_quality=args.image_quality,
             skip_images=args.skip_images,
+            system_prompt=args.system_prompt,
         )
         all_stats[split] = stats
 
@@ -517,29 +578,29 @@ def main():
     logger.info("PROCESSING SUMMARY")
     logger.info("=" * 60)
 
-    total_examples = 0
     total_processed = 0
     total_skipped = 0
+    total_rounds = 0
 
     for split, stats in all_stats.items():
-        avg_examples = (
-            stats["examples_generated"] / max(1, stats["samples_processed"])
+        avg_rounds = (
+            stats["total_rounds"] / max(1, stats["samples_processed"])
         )
         logger.info(f"\n{split.upper()} SPLIT:")
         logger.info(f"  Samples processed: {stats['samples_processed']}")
         logger.info(f"  Samples skipped: {stats['samples_skipped']}")
         logger.info(f"    - No image: {stats['samples_no_image']}")
         logger.info(f"    - No conversations: {stats['samples_no_conversations']}")
-        logger.info(f"  BC examples generated: {stats['examples_generated']}")
-        logger.info(f"  Avg examples/sample: {avg_examples:.2f}")
+        logger.info(f"  Total conversation rounds: {stats['total_rounds']}")
+        logger.info(f"  Avg rounds/sample: {avg_rounds:.2f}")
         logger.info(f"  Images saved: {stats['images_saved']}")
 
-        total_examples += stats["examples_generated"]
         total_processed += stats["samples_processed"]
         total_skipped += stats["samples_skipped"]
+        total_rounds += stats["total_rounds"]
 
     logger.info("\n" + "-" * 60)
-    logger.info(f"TOTAL: {total_examples} BC examples from {total_processed} samples")
+    logger.info(f"TOTAL: {total_processed} conversations with {total_rounds} rounds")
     logger.info(f"       ({total_skipped} samples skipped)")
     logger.info("=" * 60)
 
