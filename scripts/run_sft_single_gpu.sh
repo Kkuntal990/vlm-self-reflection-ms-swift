@@ -6,7 +6,7 @@ source /workspace/scripts/env.sh
 
 # Training configuration with sensible defaults
 MODEL_ID="${MODEL_ID:-Qwen/Qwen3-8B}"
-DATASET_ID="${DATASET_ID:-tatsu-lab/alpaca#500}"
+DATASET_ID="${DATASET_ID:-/outputs/fire_bc_coco_only/fire_sharegpt_train.jsonl}"
 MAX_LEN="${MAX_LEN:-2048}"
 BATCH="${BATCH:-1}"
 GRAD_ACC="${GRAD_ACC:-16}"

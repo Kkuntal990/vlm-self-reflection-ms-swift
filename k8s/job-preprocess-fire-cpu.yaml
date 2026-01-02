@@ -34,11 +34,12 @@ spec:
           echo "Max samples: ${MAX_SAMPLES} (0 = all)"
           echo ""
 
-          # Run preprocessing
+          # Run preprocessing (using pre-downloaded images)
           python /workspace/scripts/prepare_fire_sharegpt.py \
             --dataset_id "${DATASET_ID}" \
             --output_dir /outputs/fire_sharegpt \
             --image_dir /outputs/fire_images \
+            --source_images_dir /outputs \
             --max_samples ${MAX_SAMPLES} \
             --splits train test \
             --streaming

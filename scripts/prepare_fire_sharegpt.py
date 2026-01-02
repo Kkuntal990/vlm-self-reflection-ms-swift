@@ -28,8 +28,9 @@ import sys
 from pathlib import Path
 from typing import Union
 
-# Set HuggingFace download timeout to avoid network issues
-os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "300")  # 5 minutes
+# Set HuggingFace timeouts to avoid network issues
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")  # 10 minutes for downloads
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")  # 1 minute for metadata checks
 
 from datasets import load_dataset
 from PIL import Image
@@ -43,7 +44,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Default system prompt - can be customized via command line or by editing here
-DEFAULT_SYSTEM_PROMPT = ""
+DEFAULT_SYSTEM_PROMPT = "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,14 +54,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="/outputs/fire_sharegpt",
+        default="/outputs/fire_bc",
         help="Directory for output JSONL files",
     )
     parser.add_argument(
         "--image_dir",
         type=str,
-        default="/cache/fire_images",
+        default="/outputs/fire_bc/images",
         help="Directory to save extracted images",
+    )
+    parser.add_argument(
+        "--source_images_dir",
+        type=str,
+        default=None,
+        help="Directory containing pre-downloaded source images (e.g., /outputs with coco/, mathvista/ subdirs). Samples without images will be skipped.",
+    )
+    parser.add_argument(
+        "--filter_sources",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Only process samples from specific image sources (e.g., 'coco' 'mathvista'). Useful for processing available images while others download.",
     )
     parser.add_argument(
         "--max_samples",
@@ -359,6 +373,8 @@ def process_split(
     image_quality: int,
     skip_images: bool = False,
     system_prompt: str = "",
+    source_images_dir: Path | None = None,
+    filter_sources: list[str] | None = None,
 ) -> dict:
     """Process a single dataset split.
 
@@ -390,7 +406,12 @@ def process_split(
     # First pass: collect image paths we need
     logger.info(f"Collecting needed image paths from FIRE...")
     if streaming:
-        fire_samples = list(dataset.take(max_samples if max_samples > 0 else 1000))
+        if max_samples > 0:
+            fire_samples = list(dataset.take(max_samples))
+        else:
+            # Take all samples - streaming datasets don't have len() so we iterate fully
+            logger.info(f"Loading all samples from streaming dataset (this may take time)...")
+            fire_samples = list(dataset)
     else:
         if max_samples > 0:
             fire_samples = list(dataset.select(range(min(max_samples, len(dataset)))))
@@ -401,18 +422,46 @@ def process_split(
     for sample in fire_samples:
         img_path = sample.get("image")
         if img_path and isinstance(img_path, str):
+            # Apply source filter if specified
+            if filter_sources:
+                # Check if image path starts with any of the filter sources
+                source = img_path.split('/')[0]
+                if source not in filter_sources:
+                    continue
             needed_image_paths.add(img_path)
+
+    # Log filtering info
+    if filter_sources:
+        logger.info(f"Filtering to only process sources: {filter_sources}")
 
     # Categorize images by source
     coco_paths = {p for p in needed_image_paths if p.startswith('coco/')}
     mathvista_paths = {p for p in needed_image_paths if p.startswith('mathvista/')}
-    other_paths = needed_image_paths - coco_paths - mathvista_paths
+    # Also include "images/" paths as MathVista (inconsistent path format in FIRE dataset)
+    images_only_paths = {p for p in needed_image_paths if p.startswith('images/')}
+    other_paths = needed_image_paths - coco_paths - mathvista_paths - images_only_paths
 
     logger.info(f"Need {len(needed_image_paths)} unique images total:")
     logger.info(f"  - COCO: {len(coco_paths)}")
     logger.info(f"  - MathVista: {len(mathvista_paths)}")
+    if images_only_paths:
+        logger.info(f"  - MathVista (alt format): {len(images_only_paths)}")
+        mathvista_paths.update(images_only_paths)  # Add to mathvista set
     if other_paths:
         logger.warning(f"  - Unknown sources: {len(other_paths)}")
+
+    # Initialize stats early
+    stats = {
+        "split": split,
+        "samples_processed": 0,
+        "samples_skipped": 0,
+        "samples_no_image": 0,
+        "samples_no_conversations": 0,
+        "samples_filtered_by_source": 0,
+        "total_rounds": 0,
+        "images_saved": 0,
+        "errors": [],
+    }
 
     # Load images from source datasets (or skip if requested)
     source_images = {}
@@ -420,6 +469,26 @@ def process_split(
     if skip_images:
         logger.warning(f"Skipping image loading (--skip-images flag set)")
         logger.warning(f"Image paths will be placeholders for testing only!")
+    elif source_images_dir:
+        # Use pre-downloaded images
+        logger.info(f"Using pre-downloaded images from: {source_images_dir}")
+
+        # Check all needed image paths exist
+        missing_images = []
+        for img_path in needed_image_paths:
+            source_path = source_images_dir / img_path
+            if source_path.exists():
+                source_images[img_path] = str(source_path)
+            else:
+                missing_images.append(img_path)
+
+        logger.info(f"Found {len(source_images)}/{len(needed_image_paths)} images in source directory")
+        if missing_images:
+            logger.warning(f"Missing {len(missing_images)} images:")
+            for missing in missing_images[:10]:
+                logger.warning(f"  - {missing}")
+            if len(missing_images) > 10:
+                logger.warning(f"  ... and {len(missing_images) - 10} more")
     else:
         # Load COCO images if needed
         if coco_paths:
@@ -486,11 +555,14 @@ def process_split(
                     logger.warning(f"Cannot process {len(mathvista_paths)} samples without MathVista images")
                 else:
                     # Extract filename to path mapping for MathVista
-                    mathvista_filename_map = {}
+                    # Map each base filename to ALL possible path variations
+                    mathvista_filename_to_paths = {}
                     for path in mathvista_paths:
-                        # Extract filename from mathvista/images/123.jpg
+                        # Extract filename from mathvista/images/123.jpg or images/123.jpg
                         filename = path.split('/')[-1]
-                        mathvista_filename_map[filename] = path
+                        if filename not in mathvista_filename_to_paths:
+                            mathvista_filename_to_paths[filename] = []
+                        mathvista_filename_to_paths[filename].append(path)
 
                     # Search MathVista dataset
                     for mv_sample in tqdm(mathvista_dataset, desc="Searching MathVista"):
@@ -508,17 +580,18 @@ def process_split(
                                 # Try matching with .jpg extension
                                 for ext in ['.jpg', '.png', '.jpeg', '']:
                                     test_filename = f"{sample_id}{ext}"
-                                    if test_filename in mathvista_filename_map:
-                                        img_path = mathvista_filename_map[test_filename]
-                                        source_images[img_path] = mv_sample['image']
+                                    if test_filename in mathvista_filename_to_paths:
+                                        # Store image under ALL path variations for this filename
+                                        for img_path in mathvista_filename_to_paths[test_filename]:
+                                            source_images[img_path] = mv_sample['image']
                                         break
 
                         # Check if we found all MathVista images
-                        mathvista_found = len([p for p in source_images if p.startswith('mathvista/')])
+                        mathvista_found = len([p for p in source_images if p.startswith('mathvista/') or p.startswith('images/')])
                         if mathvista_found >= len(mathvista_paths):
                             break
 
-                    mathvista_found = len([p for p in source_images if p.startswith('mathvista/')])
+                    mathvista_found = len([p for p in source_images if p.startswith('mathvista/') or p.startswith('images/')])
                     logger.info(f"Found {mathvista_found}/{len(mathvista_paths)} MathVista images")
 
             except Exception as e:
@@ -528,16 +601,6 @@ def process_split(
         logger.info(f"Total images loaded: {len(source_images)}/{len(needed_image_paths)}")
 
     output_file = output_dir / f"fire_sharegpt_{split}.jsonl"
-    stats = {
-        "split": split,
-        "samples_processed": 0,
-        "samples_skipped": 0,
-        "samples_no_image": 0,
-        "samples_no_conversations": 0,
-        "total_rounds": 0,
-        "images_saved": 0,
-        "errors": [],
-    }
 
     with open(output_file, "w", encoding="utf-8") as f:
         desc = f"Processing {split}"
@@ -560,14 +623,32 @@ def process_split(
                         stats["errors"].append(f"{sample_id}: No image path")
                     continue
 
+                # Apply source filter if specified
+                if filter_sources:
+                    source = image_path_ref.split('/')[0]
+                    if source not in filter_sources:
+                        stats["samples_skipped"] += 1
+                        stats["samples_filtered_by_source"] += 1
+                        continue
+
                 # Handle image based on skip_images flag
                 if skip_images:
                     # Use placeholder path for testing
                     image_save_path = f"/placeholder/images/{split}/{sample_id}.jpg"
                     stats["images_saved"] += 1
-                else:
-                    # Look up actual image from source datasets
+                elif source_images_dir:
+                    # When using pre-downloaded images, reference original paths directly (no copy)
                     image = source_images.get(image_path_ref)
+
+                    # If not found, try alternative path formats
+                    if image is None and image_path_ref.startswith('images/'):
+                        # Try with mathvista/ prefix (for paths like "images/123.jpg")
+                        alt_path = f"mathvista/{image_path_ref}"
+                        image = source_images.get(alt_path)
+                        if image is not None:
+                            image_path_ref = alt_path
+                            image = source_images.get(alt_path)
+
                     if image is None:
                         stats["samples_skipped"] += 1
                         stats["samples_no_image"] += 1
@@ -575,7 +656,29 @@ def process_split(
                             stats["errors"].append(f"{sample_id}: Image not found: {image_path_ref}")
                         continue
 
-                    # Save image to disk
+                    # Image is already a path string - use directly (no copy)
+                    image_save_path = image
+                    stats["images_saved"] += 1
+                else:
+                    # Download from HuggingFace and save to disk
+                    image = source_images.get(image_path_ref)
+
+                    # If not found, try alternative path formats
+                    if image is None and image_path_ref.startswith('images/'):
+                        # Try with mathvista/ prefix (for paths like "images/123.jpg")
+                        alt_path = f"mathvista/{image_path_ref}"
+                        image = source_images.get(alt_path)
+                        if image is not None:
+                            image_path_ref = alt_path
+
+                    if image is None:
+                        stats["samples_skipped"] += 1
+                        stats["samples_no_image"] += 1
+                        if len(stats["errors"]) < 100:
+                            stats["errors"].append(f"{sample_id}: Image not found: {image_path_ref}")
+                        continue
+
+                    # Save image to disk (image is a PIL Image object)
                     image_save_path = str(split_image_dir / f"{sample_id}.jpg")
                     if not save_image(image, image_save_path, image_quality):
                         stats["samples_skipped"] += 1
@@ -634,6 +737,8 @@ def main():
 
     all_stats = {}
 
+    source_images_dir = Path(args.source_images_dir) if args.source_images_dir else None
+
     for split in args.splits:
         stats = process_split(
             dataset_id=args.dataset_id,
@@ -645,6 +750,8 @@ def main():
             image_quality=args.image_quality,
             skip_images=args.skip_images,
             system_prompt=args.system_prompt,
+            source_images_dir=source_images_dir,
+            filter_sources=args.filter_sources,
         )
         all_stats[split] = stats
 
@@ -670,6 +777,7 @@ def main():
         logger.info(f"\n{split.upper()} SPLIT:")
         logger.info(f"  Samples processed: {stats['samples_processed']}")
         logger.info(f"  Samples skipped: {stats['samples_skipped']}")
+        logger.info(f"    - Filtered by source: {stats.get('samples_filtered_by_source', 0)}")
         logger.info(f"    - No image: {stats['samples_no_image']}")
         logger.info(f"    - No conversations: {stats['samples_no_conversations']}")
         logger.info(f"  Total conversation rounds: {stats['total_rounds']}")

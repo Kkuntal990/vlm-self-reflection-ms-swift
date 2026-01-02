@@ -53,9 +53,9 @@ spec:
 
     # Model and dataset configuration
     - name: MODEL_ID
-      value: "Qwen/Qwen2.5-VL-32B-Instruct"
+      value: "Qwen/Qwen2.5-VL-7B-Instruct"
     - name: DATASET_ID
-      value: "lmms-lab/VQAv2#500"
+      value: "/outputs/fire_bc_coco_only/fire_sharegpt_train.jsonl"
 
     # Training hyperparameters
     - name: MAX_LEN
@@ -65,7 +65,7 @@ spec:
     - name: GRAD_ACC
       value: "8"
     - name: EPOCHS
-      value: "1"
+      value: "1000"
     - name: LR
       value: "2e-4"
     - name: LORA_RANK

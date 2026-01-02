@@ -17,19 +17,28 @@ This project provides a production-ready setup for fine-tuning Qwen3-8B using:
 ├── Dockerfile                          # CUDA 12.1 + ms-swift container
 ├── requirements.txt                    # Python dependencies
 ├── .dockerignore                       # Build optimization
+├── README.md                           # Comprehensive documentation (this file)
+├── QUICKSTART.md                       # Quick deployment guide
+├── CLAUDE.md                           # Developer guide for Claude Code
 ├── scripts/
 │   ├── env.sh                         # Environment configuration
 │   ├── run_sft_ddp.sh                 # 2-GPU DDP training (Qwen3-8B)
+│   ├── run_sft_single_gpu.sh          # Single-GPU training (dev/test)
 │   ├── run_sft_qwen3vl_fire_4gpu.sh  # 4-GPU FIRE behavior cloning (Qwen3-VL-32B)
-│   └── prepare_fire_full_state_jsonl.py  # FIRE dataset preprocessing
+│   ├── prepare_fire_sharegpt.py       # FIRE dataset preprocessing (690 lines)
+│   ├── prepare_volcano_sharegpt.py    # Volcano dataset preprocessing
+│   └── test_fire_preprocessing.sh     # Local preprocessing test
 ├── k8s/
-│   ├── pvc-cache.yaml                 # rook-ceph-block for cache
-│   ├── pvc-outputs.yaml               # rook-cephfs for checkpoints
+│   ├── pvc-cache.yaml                 # linstor-ucsc for cache (500Gi)
+│   ├── pvc-outputs.yaml               # rook-cephfs for checkpoints (500Gi)
 │   ├── job-sft-qwen3-8b-2gpu.yaml    # 2-GPU Qwen3-8B Job
 │   ├── job-preprocess-fire-cpu.yaml   # CPU-only FIRE preprocessing Job
 │   ├── job-sft-qwen3vl-fire-4gpu.yaml # 4-GPU FIRE behavior cloning Job
+│   ├── jupyter-2gpu-test.yaml         # Interactive development pod
 │   └── secret-hf-token.yaml.template  # HuggingFace token template
-└── README.md                           # This file
+├── notebooks/
+│   └── dataset_analysis.ipynb         # Dataset exploration and validation
+└── test_fire_local/                   # Local FIRE preprocessing outputs
 ```
 
 ## Storage Strategy
@@ -463,6 +472,238 @@ Before asking for help, verify:
 - [ ] HF token is valid (if using gated models)
 - [ ] Sufficient storage: Cache PVC has space for model (~16GB) + dataset (~500MB)
 - [ ] NCCL can communicate: Check firewall rules for inter-GPU communication
+
+## Local Development
+
+### Testing Preprocessing Scripts
+
+Test dataset preprocessing locally before running on cluster:
+
+```bash
+# Test FIRE preprocessing with 10 samples (no image download)
+./scripts/test_fire_preprocessing.sh
+
+# Or manually with custom parameters
+python scripts/prepare_fire_sharegpt.py \
+  --output_dir ./test_fire_local/outputs \
+  --image_dir ./test_fire_local/images \
+  --max_samples 10 \
+  --splits train \
+  --skip-images
+```
+
+### Jupyter Notebook Analysis
+
+Explore datasets and validate preprocessing logic:
+
+```bash
+# Install Jupyter locally
+pip install jupyter jupyterlab ipywidgets
+
+# Run notebook
+jupyter lab notebooks/dataset_analysis.ipynb
+```
+
+### Single-GPU Development
+
+For local development or testing on single GPU:
+
+```bash
+# Edit scripts/run_sft_single_gpu.sh to customize parameters
+# Then run directly (not recommended for production)
+bash scripts/run_sft_single_gpu.sh
+```
+
+Or use the Jupyter pod for interactive testing:
+
+```bash
+# Deploy Jupyter pod with 2 GPUs
+kubectl apply -f k8s/jupyter-2gpu-test.yaml
+
+# Access the pod
+kubectl exec -it vlm-jupyter -- bash
+
+# Inside pod: Start Jupyter Lab
+pip install jupyter jupyterlab ipywidgets
+jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root \
+  --ServerApp.token='medvae2024' --ServerApp.password=''
+
+# In local terminal: Port forward
+kubectl port-forward vlm-jupyter 8888:8888
+
+# Access http://localhost:8888 in browser
+```
+
+## Volcano Dataset (Alternative to FIRE)
+
+This project also supports the Volcano dataset for VLM training:
+
+### Preprocessing Volcano Dataset
+
+```bash
+# Local test (10 samples, no images)
+python scripts/prepare_volcano_sharegpt.py \
+  --output_dir ./test_volcano_local/outputs \
+  --image_dir ./test_volcano_local/images \
+  --max_samples 10 \
+  --split train \
+  --skip-images
+
+# Full preprocessing on cluster (create similar job to fire-preprocess-cpu-job)
+```
+
+**Dataset**: kaist-ai/volcano-train from HuggingFace
+
+**Format**: Same ShareGPT format as FIRE, compatible with ms-swift training
+
+## Testing Best Practices
+
+### Before Submitting Jobs
+
+1. **Validate Kubernetes manifests**:
+   ```bash
+   kubectl apply --dry-run=client -f k8s/job-sft-qwen3-8b-2gpu.yaml
+   kubectl apply --dry-run=server -f k8s/job-sft-qwen3-8b-2gpu.yaml
+   ```
+
+2. **Test preprocessing locally**:
+   - Always run preprocessing tests with `--skip-images` and small sample size
+   - Verify output JSONL format matches expected structure
+   - Check statistics in generated stats.json
+
+3. **Verify Docker image**:
+   ```bash
+   # Test container locally
+   docker run --rm -it --gpus all <your-image> bash
+   # Inside container
+   python -c "import torch; print(torch.cuda.is_available())"
+   nvidia-smi
+   ```
+
+4. **Run smoke test before full training**:
+   - Use 500 samples or less
+   - Verify model downloads, DDP initialization, and training loss decrease
+   - Check checkpoint saves correctly
+
+### During Development
+
+1. **Monitor resource usage**:
+   ```bash
+   kubectl top pod $POD_NAME
+   kubectl exec -it $POD_NAME -- nvidia-smi dmon -s u
+   ```
+
+2. **Check logs continuously**:
+   ```bash
+   kubectl logs -f job/qwen3-8b-sft-job
+   ```
+
+3. **Validate checkpoints**:
+   ```bash
+   kubectl exec -it $POD_NAME -- ls -lh /outputs/qwen3-8b-sft/
+   ```
+
+## Contributing & Pull Requests
+
+### Code Quality Standards
+
+1. **Python Code**:
+   - Follow PEP 8 style guidelines
+   - Add docstrings to functions and classes
+   - Use type hints where applicable
+   - Keep functions focused and under 50 lines when possible
+
+2. **Shell Scripts**:
+   - Use `set -e` to exit on errors
+   - Add comments for complex operations
+   - Quote variables to prevent word splitting
+
+3. **Kubernetes Manifests**:
+   - Include resource requests and limits
+   - Add meaningful labels and annotations
+   - Document environment variables in comments
+
+### Git Workflow
+
+1. **Branch Naming**:
+   - Feature: `feature/description`
+   - Bug fix: `fix/description`
+   - Documentation: `docs/description`
+
+2. **Commit Messages**:
+
+   ```text
+   <type>: <short summary> (max 50 chars)
+
+   <detailed description if needed>
+
+   - Bullet points for changes
+   - Reference issues: Fixes #123
+   ```
+
+   Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
+3. **Before Creating PR**:
+   ```bash
+   # Ensure you're on latest main
+   git checkout main
+   git pull origin main
+
+   # Create feature branch
+   git checkout -b feature/my-new-feature
+
+   # Make changes and commit
+   git add .
+   git commit -m "feat: add support for new dataset"
+
+   # Push to remote
+   git push origin feature/my-new-feature
+   ```
+
+4. **PR Checklist**:
+   - [ ] Code follows project style guidelines
+   - [ ] All tests pass (local preprocessing tests)
+   - [ ] Documentation updated (README.md if needed)
+   - [ ] Environment variables documented
+   - [ ] Smoke test validated on cluster (if applicable)
+   - [ ] No secrets or credentials committed
+   - [ ] Docker image builds successfully
+   - [ ] Kubernetes manifests validated with `--dry-run`
+
+5. **PR Description Template**:
+
+   ```markdown
+   ## Summary
+   Brief description of changes
+
+   ## Changes
+   - Change 1
+   - Change 2
+
+   ## Testing
+   - [ ] Local preprocessing test passed
+   - [ ] Docker image builds
+   - [ ] Smoke test on cluster (if applicable)
+
+   ## Related Issues
+   Closes #123
+   ```
+
+### Code Review Guidelines
+
+**For Reviewers**:
+
+- Check for hardcoded values that should be environment variables
+- Verify resource requests/limits are appropriate
+- Ensure error handling is present
+- Look for potential security issues (exposed secrets, etc.)
+
+**For Authors**:
+
+- Respond to all comments
+- Update PR based on feedback
+- Re-request review after changes
+- Squash commits before merge (if requested)
 
 ## License
 

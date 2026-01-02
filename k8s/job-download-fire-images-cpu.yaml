@@ -1,0 +1,100 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fire-build-mapping-cpu-job
+  labels:
+    app: ms-swift
+    task: fire-mapping-builder
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: fire-mapping-builder
+    spec:
+      containers:
+      - name: fire-mapping-builder
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "FIRE Image Mapping Builder (CPU-only)"
+          echo "All 38 Dataset/Split Combinations"
+          echo "========================================="
+          echo ""
+          echo "Cache directory: /cache"
+          echo "Output mapping: /outputs/fire_image_mapping.json"
+          echo ""
+
+          # Run mapping builder
+          # This will:
+          # 1. Scan FIRE dataset for all image paths
+          # 2. Download source datasets to HuggingFace cache
+          # 3. Build {fire_path: {dataset, split, index}} mapping
+          python /workspace/scripts/build_fire_image_mapping.py \
+            --fire_dataset "PengxiangLi/FIRE" \
+            --cache_dir /cache \
+            --output_mapping /outputs/fire_image_mapping.json \
+            --splits train test \
+            --max_samples 0
+
+          echo ""
+          echo "========================================="
+          echo "Mapping Complete"
+          echo "========================================="
+          echo ""
+
+          # Show mapping stats
+          if [ -f /outputs/fire_image_mapping.json ]; then
+            echo "Mapping file created: /outputs/fire_image_mapping.json"
+            echo "File size: $(du -h /outputs/fire_image_mapping.json | cut -f1)"
+            echo "Total paths mapped: $(jq 'length' /outputs/fire_image_mapping.json 2>/dev/null || echo 'N/A')"
+          else
+            echo "ERROR: Mapping file not created!"
+            exit 1
+          fi
+
+          echo ""
+          echo "Ready for preprocessing with mapping!"
+          echo "Submit job-preprocess-fire-cpu.yaml next"
+          echo "========================================="
+
+        env:
+        # HuggingFace token (optional for public datasets)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        resources:
+          requests:
+            memory: "16Gi"
+            cpu: "4"
+          limits:
+            memory: "32Gi"
+            cpu: "8"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+
+      restartPolicy: Never
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
