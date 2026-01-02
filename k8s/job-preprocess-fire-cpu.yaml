@@ -26,22 +26,20 @@ spec:
 
           echo "========================================="
           echo "FIRE Dataset Preprocessing (CPU-only)"
-          echo "Behavior Cloning Format Conversion"
+          echo "ShareGPT Format Conversion"
           echo "========================================="
           echo ""
           echo "Dataset: ${DATASET_ID}"
           echo "Splits: train test"
           echo "Max samples: ${MAX_SAMPLES} (0 = all)"
-          echo "Max history rounds: ${MAX_HISTORY_ROUNDS}"
           echo ""
 
           # Run preprocessing
-          python /workspace/scripts/prepare_fire_full_state_jsonl.py \
+          python /workspace/scripts/prepare_fire_sharegpt.py \
             --dataset_id "${DATASET_ID}" \
-            --output_dir /outputs/fire_bc \
-            --image_dir /cache/fire_images \
+            --output_dir /outputs/fire_sharegpt \
+            --image_dir /outputs/fire_images \
             --max_samples ${MAX_SAMPLES} \
-            --max_history_rounds ${MAX_HISTORY_ROUNDS} \
             --splits train test \
             --streaming
 
@@ -51,16 +49,16 @@ spec:
           echo "========================================="
           echo ""
           echo "Output files:"
-          ls -lh /outputs/fire_bc/
+          ls -lh /outputs/fire_sharegpt/
           echo ""
           echo "Sample counts:"
-          wc -l /outputs/fire_bc/fire_bc_*.jsonl
+          wc -l /outputs/fire_sharegpt/fire_sharegpt_*.jsonl
           echo ""
           echo "Statistics:"
-          cat /outputs/fire_bc/stats.json
+          cat /outputs/fire_sharegpt/stats.json
           echo ""
           echo "First training example:"
-          head -1 /outputs/fire_bc/fire_bc_train.jsonl | python -m json.tool
+          head -1 /outputs/fire_sharegpt/fire_sharegpt_train.jsonl | python -m json.tool
           echo ""
           echo "Ready for training! Submit job-sft-qwen3vl-fire-4gpu.yaml"
           echo "========================================="
@@ -81,16 +79,14 @@ spec:
         # Preprocessing configuration
         - name: MAX_SAMPLES
           value: "0"  # 0 = all samples; set to "100" for quick testing
-        - name: MAX_HISTORY_ROUNDS
-          value: "6"  # Max history rounds in state (context control)
 
         resources:
           requests:
-            memory: "32Gi"
-            cpu: "16"
+            memory: "16Gi"
+            cpu: "4"
           limits:
-            memory: "64Gi"
-            cpu: "32"
+            memory: "16Gi"
+            cpu: "4"
 
         volumeMounts:
         - name: cache-volume
@@ -99,16 +95,6 @@ spec:
           mountPath: /outputs
 
       restartPolicy: Never
-
-      # Optional: prefer non-GPU nodes for cost savings
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            preference:
-              matchExpressions:
-              - key: nvidia.com/gpu.product
-                operator: DoesNotExist
 
       volumes:
       - name: cache-volume

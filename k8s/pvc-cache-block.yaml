@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ms-swift-cache-block-pvc
+  labels:
+    app: ms-swift
+    tier: storage
+    purpose: model-cache
+spec:
+  # Linstor with WaitForFirstConsumer for zone-aware provisioning
+  storageClassName: linstor-fast-cache
+  accessModes:
+    - ReadWriteOnce  # Best performance, single-node access
+  volumeMode: Block  # Raw block device - requires app changes but maximum performance
+  resources:
+    requests:
+      storage: 500Gi  # Larger size provides more IOPS
+
+# NOTE: To use this Block PVC in your pods, you must use volumeDevices instead of volumeMounts:
+#
+# containers:
+# - name: model-loader
+#   volumeDevices:
+#   - name: cache-volume
+#     devicePath: /dev/cache-disk
+#
+# volumes:
+# - name: cache-volume
+#   persistentVolumeClaim:
+#     claimName: ms-swift-cache-block-pvc

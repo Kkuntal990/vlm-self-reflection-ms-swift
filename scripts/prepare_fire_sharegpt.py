@@ -403,48 +403,129 @@ def process_split(
         if img_path and isinstance(img_path, str):
             needed_image_paths.add(img_path)
 
-    logger.info(f"Need {len(needed_image_paths)} unique images from COCO")
+    # Categorize images by source
+    coco_paths = {p for p in needed_image_paths if p.startswith('coco/')}
+    mathvista_paths = {p for p in needed_image_paths if p.startswith('mathvista/')}
+    other_paths = needed_image_paths - coco_paths - mathvista_paths
 
-    # Load images from COCO (or skip if requested)
-    coco_images = {}
+    logger.info(f"Need {len(needed_image_paths)} unique images total:")
+    logger.info(f"  - COCO: {len(coco_paths)}")
+    logger.info(f"  - MathVista: {len(mathvista_paths)}")
+    if other_paths:
+        logger.warning(f"  - Unknown sources: {len(other_paths)}")
+
+    # Load images from source datasets (or skip if requested)
+    source_images = {}
 
     if skip_images:
         logger.warning(f"Skipping image loading (--skip-images flag set)")
         logger.warning(f"Image paths will be placeholders for testing only!")
     else:
-        logger.info(f"Loading COCO dataset to fetch needed images...")
-        logger.warning(f"This may take a long time for the first run...")
+        # Load COCO images if needed
+        if coco_paths:
+            logger.info(f"Loading COCO dataset to fetch {len(coco_paths)} images...")
+            logger.warning(f"This may take a long time for the first run...")
 
-        # Try to load COCO with the images feature
-        try:
-            coco_train = load_dataset("detection-datasets/coco", split="train", streaming=True)
-            coco_val = load_dataset("detection-datasets/coco", split="val", streaming=True)
+            try:
+                coco_train = load_dataset("detection-datasets/coco", split="train", streaming=True)
+                coco_val = load_dataset("detection-datasets/coco", split="val", streaming=True)
 
-            # Search for needed images
-            for coco_sample in tqdm(coco_train, desc="Searching COCO train"):
-                if 'image' in coco_sample and 'image_id' in coco_sample:
-                    filename = f"{coco_sample['image_id']:012d}.jpg"
-                    img_path = f"coco/train2017/{filename}"
-                    if img_path in needed_image_paths:
-                        coco_images[img_path] = coco_sample['image']
-                        if len(coco_images) >= len(needed_image_paths):
-                            break
-
-            # Search validation set if needed
-            if len(coco_images) < len(needed_image_paths):
-                for coco_sample in tqdm(coco_val, desc="Searching COCO val"):
+                # Search for needed images in COCO train
+                for coco_sample in tqdm(coco_train, desc="Searching COCO train"):
                     if 'image' in coco_sample and 'image_id' in coco_sample:
                         filename = f"{coco_sample['image_id']:012d}.jpg"
-                        img_path = f"coco/val2017/{filename}"
-                        if img_path in needed_image_paths:
-                            coco_images[img_path] = coco_sample['image']
-                            if len(coco_images) >= len(needed_image_paths):
+                        img_path = f"coco/train2017/{filename}"
+                        if img_path in coco_paths:
+                            source_images[img_path] = coco_sample['image']
+                            if len([p for p in source_images if p.startswith('coco/')]) >= len(coco_paths):
                                 break
-        except Exception as e:
-            logger.error(f"Failed to load COCO dataset: {e}")
-            logger.warning(f"Cannot process samples without COCO images")
 
-        logger.info(f"Found {len(coco_images)} images in COCO")
+                # Search COCO validation set if needed
+                coco_found = len([p for p in source_images if p.startswith('coco/')])
+                if coco_found < len(coco_paths):
+                    for coco_sample in tqdm(coco_val, desc="Searching COCO val"):
+                        if 'image' in coco_sample and 'image_id' in coco_sample:
+                            filename = f"{coco_sample['image_id']:012d}.jpg"
+                            img_path = f"coco/val2017/{filename}"
+                            if img_path in coco_paths:
+                                source_images[img_path] = coco_sample['image']
+                                if len([p for p in source_images if p.startswith('coco/')]) >= len(coco_paths):
+                                    break
+
+                coco_found = len([p for p in source_images if p.startswith('coco/')])
+                logger.info(f"Found {coco_found}/{len(coco_paths)} COCO images")
+            except Exception as e:
+                logger.error(f"Failed to load COCO dataset: {e}")
+                logger.warning(f"Cannot process samples without COCO images")
+
+        # Load MathVista images if needed
+        if mathvista_paths:
+            logger.info(f"Loading MathVista dataset to fetch {len(mathvista_paths)} images...")
+
+            try:
+                # MathVista dataset - try different possible dataset paths
+                mathvista_dataset = None
+                dataset_attempts = [
+                    "AI4Math/MathVista",
+                    "MathVista/MathVista",
+                    "mathvista/MathVista"
+                ]
+
+                for dataset_name in dataset_attempts:
+                    try:
+                        logger.info(f"Trying to load {dataset_name}...")
+                        mathvista_dataset = load_dataset(dataset_name, split="testmini", streaming=True)
+                        logger.info(f"Successfully loaded {dataset_name}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"Failed to load {dataset_name}: {e}")
+                        continue
+
+                if mathvista_dataset is None:
+                    logger.error("Could not load MathVista dataset from any known source")
+                    logger.warning(f"Cannot process {len(mathvista_paths)} samples without MathVista images")
+                else:
+                    # Extract filename to path mapping for MathVista
+                    mathvista_filename_map = {}
+                    for path in mathvista_paths:
+                        # Extract filename from mathvista/images/123.jpg
+                        filename = path.split('/')[-1]
+                        mathvista_filename_map[filename] = path
+
+                    # Search MathVista dataset
+                    for mv_sample in tqdm(mathvista_dataset, desc="Searching MathVista"):
+                        # MathVista samples have 'image' field and potentially 'pid' or similar
+                        if 'image' in mv_sample:
+                            # Try to match by filename - MathVista might have different field names
+                            # Common patterns: 'pid', 'question_id', 'image_path', etc.
+                            sample_id = None
+                            for id_field in ['pid', 'question_id', 'id', 'image_id']:
+                                if id_field in mv_sample:
+                                    sample_id = str(mv_sample[id_field])
+                                    break
+
+                            if sample_id:
+                                # Try matching with .jpg extension
+                                for ext in ['.jpg', '.png', '.jpeg', '']:
+                                    test_filename = f"{sample_id}{ext}"
+                                    if test_filename in mathvista_filename_map:
+                                        img_path = mathvista_filename_map[test_filename]
+                                        source_images[img_path] = mv_sample['image']
+                                        break
+
+                        # Check if we found all MathVista images
+                        mathvista_found = len([p for p in source_images if p.startswith('mathvista/')])
+                        if mathvista_found >= len(mathvista_paths):
+                            break
+
+                    mathvista_found = len([p for p in source_images if p.startswith('mathvista/')])
+                    logger.info(f"Found {mathvista_found}/{len(mathvista_paths)} MathVista images")
+
+            except Exception as e:
+                logger.error(f"Failed to load MathVista dataset: {e}")
+                logger.warning(f"Cannot process samples without MathVista images")
+
+        logger.info(f"Total images loaded: {len(source_images)}/{len(needed_image_paths)}")
 
     output_file = output_dir / f"fire_sharegpt_{split}.jsonl"
     stats = {
@@ -485,13 +566,13 @@ def process_split(
                     image_save_path = f"/placeholder/images/{split}/{sample_id}.jpg"
                     stats["images_saved"] += 1
                 else:
-                    # Look up actual image from COCO
-                    image = coco_images.get(image_path_ref)
+                    # Look up actual image from source datasets
+                    image = source_images.get(image_path_ref)
                     if image is None:
                         stats["samples_skipped"] += 1
                         stats["samples_no_image"] += 1
                         if len(stats["errors"]) < 100:
-                            stats["errors"].append(f"{sample_id}: Image not found in COCO: {image_path_ref}")
+                            stats["errors"].append(f"{sample_id}: Image not found: {image_path_ref}")
                         continue
 
                     # Save image to disk

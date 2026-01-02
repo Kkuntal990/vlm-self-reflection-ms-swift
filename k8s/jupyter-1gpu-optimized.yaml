@@ -1,0 +1,164 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vlm-jupyter-1gpu-optimized
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+  - name: ghcr-secret
+
+  # Run init container to optimize read-ahead
+  initContainers:
+  - name: optimize-storage
+    image: busybox
+    command:
+    - sh
+    - -c
+    - |
+      # Find the block device for /cache mount
+      DEVICE=$(df /cache | tail -1 | awk '{print $1}')
+      BLOCK_DEVICE=$(echo $DEVICE | sed 's/[0-9]*$//')
+
+      # Increase read-ahead to 20MB (20480 KB)
+      # This significantly improves large sequential file reads
+      if [ -b "$BLOCK_DEVICE" ]; then
+        echo "Setting read-ahead for $BLOCK_DEVICE to 20MB"
+        blockdev --setra 20480 $BLOCK_DEVICE || echo "Could not set read-ahead (requires privileged mode)"
+      fi
+
+      # Also try to set via sysfs
+      DEVICE_NAME=$(basename $BLOCK_DEVICE)
+      if [ -f /sys/block/$DEVICE_NAME/queue/read_ahead_kb ]; then
+        echo 20480 > /sys/block/$DEVICE_NAME/queue/read_ahead_kb || echo "Could not set via sysfs"
+      fi
+
+      echo "Read-ahead optimization complete"
+    volumeMounts:
+    - name: cache-volume
+      mountPath: /cache
+    securityContext:
+      privileged: true  # Required to modify block device settings
+
+  containers:
+  - name: jupyter-container
+    image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+    command:
+    - /bin/bash
+    - -c
+    - |
+      # Additional performance tuning at application level
+
+      # Increase Python I/O buffer size for large file reads
+      export PYTHONIOENCODING=utf-8
+
+      # Set optimal PyTorch DataLoader workers
+      export OMP_NUM_THREADS=2
+
+      # Print storage performance info
+      echo "=== Storage Performance Info ==="
+      df -h /cache /outputs
+      echo ""
+      echo "Block device read-ahead settings:"
+      blockdev --getra $(df /cache | tail -1 | awk '{print $1}' | sed 's/[0-9]*$//') 2>/dev/null || echo "Cannot read blockdev info"
+      echo "================================"
+      echo ""
+
+      # Start Jupyter
+      exec jupyter lab --ip=0.0.0.0 --no-browser --allow-root --NotebookApp.token=selfimprove
+
+    resources:
+      limits:
+        nvidia.com/a100: "1"
+        memory: "32Gi"  # Increased for better file caching
+        cpu: "4"
+      requests:
+        nvidia.com/a100: "1"
+        memory: "32Gi"
+        cpu: "4"
+
+    volumeMounts:
+      - name: cache-volume
+        mountPath: /cache
+      - name: outputs-volume
+        mountPath: /outputs
+
+    env:
+    # HuggingFace token
+    - name: HF_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: hf-token
+          key: token
+          optional: true
+
+    # Cache directories
+    - name: HF_HOME
+      value: "/cache/hf"
+    - name: TRANSFORMERS_CACHE
+      value: "/cache/hf/transformers"
+    - name: HF_DATASETS_CACHE
+      value: "/cache/hf/datasets"
+    - name: TORCH_HOME
+      value: "/cache/torch"
+    - name: PIP_CACHE_DIR
+      value: "/cache/pip"
+    - name: OUTPUT_DIR
+      value: "/outputs"
+
+    # Model and dataset configuration
+    - name: MODEL_ID
+      value: "Qwen/Qwen2.5-VL-32B-Instruct"
+    - name: DATASET_ID
+      value: "lmms-lab/VQAv2#500"
+
+    # Training hyperparameters
+    - name: MAX_LEN
+      value: "2048"
+    - name: BATCH
+      value: "4"
+    - name: GRAD_ACC
+      value: "8"
+    - name: EPOCHS
+      value: "1"
+    - name: LR
+      value: "2e-4"
+    - name: LORA_RANK
+      value: "8"
+    - name: LORA_ALPHA
+      value: "16"
+
+    # Python and CUDA settings
+    - name: PYTHONUNBUFFERED
+      value: "1"
+    - name: PYTORCH_CUDA_ALLOC_CONF
+      value: "expandable_segments:True"
+
+  tolerations:
+    - key: nautilus.io/reservation
+      operator: Exists
+      effect: NoSchedule
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          # Pin to UCSD zone to match linstor-ucsc storage
+          - key: topology.kubernetes.io/zone
+            operator: In
+            values:
+            - ucsd
+
+          # Require A100 GPU
+          - key: nvidia.com/gpu.product
+            operator: In
+            values:
+            - NVIDIA-A100-SXM4-80GB
+
+  volumes:
+    - name: cache-volume
+      persistentVolumeClaim:
+        claimName: ms-swift-cache-pvc
+    - name: outputs-volume
+      persistentVolumeClaim:
+        claimName: ms-swift-outputs-pvc

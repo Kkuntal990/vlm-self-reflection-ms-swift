@@ -1,0 +1,49 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: linstor-fast-cache
+  labels:
+    app: ms-swift
+    purpose: ml-cache
+parameters:
+  # Single replica for maximum performance
+  # Use 2 or 3 for HA, but this reduces write performance
+  linstor.csi.linbit.com/autoPlace: "1"
+
+  # Storage pool - adjust based on your cluster's Linstor pool name
+  # Run: kubectl exec -it deploy/linstor-controller -n piraeus-datastore -- linstor storage-pool list
+  # to see available pools, then update this value if needed
+  # linstor.csi.linbit.com/storagePool: "your-pool-name"
+
+  # Filesystem type - XFS for best performance with large files
+  csi.storage.k8s.io/fstype: xfs
+
+  # XFS mount options optimized for sequential I/O (model shards)
+  # - largeio: optimize for large I/O operations
+  # - swalloc: stripe-width allocation (good for sequential writes)
+  # - noatime: don't update access times (performance boost)
+  linstor.csi.linbit.com/mountOpts: largeio,swalloc,noatime
+
+  # XFS format options
+  # - bigtime=1,inobtcount=1: modern XFS features for better performance
+  linstor.csi.linbit.com/fsOpts: -m bigtime=1,inobtcount=1
+
+  # DRBD performance tuning parameters
+  # These are passed to LINSTOR as resource properties
+
+  # Disable remote volume access for lowest latency
+  # This ensures volumes are only accessible from the node they're provisioned on
+  linstor.csi.linbit.com/allowRemoteVolumeAccess: "false"
+
+  # Optional: Use thick LVM for better I/O performance (no thin provisioning overhead)
+  # Uncomment if your storage pool supports it
+  # property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: suspend-io
+  # property.linstor.csi.linbit.com/DrbdOptions/quorum: majority
+
+provisioner: linstor.csi.linbit.com
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+
+# CRITICAL: WaitForFirstConsumer ensures volume is created in same zone as pod
+# This eliminates cross-zone latency
+volumeBindingMode: WaitForFirstConsumer

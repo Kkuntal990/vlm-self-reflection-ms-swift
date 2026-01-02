@@ -5,12 +5,15 @@ metadata:
   labels:
     app: ms-swift
     tier: storage
+    purpose: model-cache
 spec:
-  # Use rook-ceph-block for cache - optimized for many small files
-  # (HuggingFace models, datasets, pip cache)
-  storageClassName: rook-ceph-block
+  # Using zone-specific Linstor StorageClass
+  # Options: linstor-ucsc, linstor-sdsu, linstor-igrok, linstor-unl
+  # Choose based on where your GPUs are located
+  storageClassName: linstor-ucsc
   accessModes:
-    - ReadWriteOnce  # Single-node access sufficient for cache
+    - ReadWriteOnce  # Best performance, single-node access
+  volumeMode: Filesystem  # XFS filesystem optimized for large sequential I/O
   resources:
     requests:
-      storage: 300Gi
+      storage: 500Gi  # Larger size provides more IOPS

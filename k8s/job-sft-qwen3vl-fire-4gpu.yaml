@@ -35,9 +35,9 @@ spec:
           echo ""
 
           # Verify preprocessed data exists
-          if [ ! -f /outputs/fire_bc/fire_bc_train.jsonl ]; then
+          if [ ! -f /outputs/fire_sharegpt/fire_sharegpt_train.jsonl ]; then
             echo "ERROR: Preprocessed data not found!"
-            echo "Expected: /outputs/fire_bc/fire_bc_train.jsonl"
+            echo "Expected: /outputs/fire_sharegpt/fire_sharegpt_train.jsonl"
             echo ""
             echo "Please run preprocessing first:"
             echo "  kubectl apply -f k8s/job-preprocess-fire-cpu.yaml"
@@ -46,8 +46,8 @@ spec:
           fi
 
           echo "Found preprocessed data:"
-          ls -lh /outputs/fire_bc/
-          wc -l /outputs/fire_bc/fire_bc_*.jsonl
+          ls -lh /outputs/fire_sharegpt/
+          wc -l /outputs/fire_sharegpt/fire_sharegpt_*.jsonl
           echo ""
 
           # Start training
@@ -68,9 +68,9 @@ spec:
         - name: MODEL_ID
           value: "Qwen/Qwen3-VL-32B-Instruct"
         - name: DATASET_PATH
-          value: "/outputs/fire_bc/fire_bc_train.jsonl"
+          value: "/outputs/fire_sharegpt/fire_sharegpt_train.jsonl"
         - name: VAL_DATASET_PATH
-          value: "/outputs/fire_bc/fire_bc_test.jsonl"
+          value: "/outputs/fire_sharegpt/fire_sharegpt_test.jsonl"
 
         # Sequence configuration
         - name: MAX_LEN
