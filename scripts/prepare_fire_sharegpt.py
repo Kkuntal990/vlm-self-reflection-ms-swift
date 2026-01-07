@@ -7,15 +7,32 @@ Converts FIRE multi-round student-teacher conversations into ShareGPT format:
 - Question starts as 'human' with <image> token
 - Student answers become 'gpt' responses
 - Teacher feedback becomes 'human' responses
-- Ignores thought and score fields
+- Includes configurable system prompt
 
-Usage:
+Image Loading Modes (pick one):
+  1. --source_images_dir: Reference pre-downloaded images (no duplication)
+  2. --mapping_file: Load via mapping JSON (from build_fire_image_mapping.py)
+  3. --skip-images: Placeholder paths for testing
+
+Usage Examples:
+    # Mode 1: Pre-downloaded images (COCO only)
     python scripts/prepare_fire_sharegpt.py \
-        --output_dir /outputs/fire_sharegpt \
-        --image_dir /cache/fire_images \
-        --max_samples 0 \
-        --splits train test \
-        --streaming
+        --output_dir /outputs/fire_bc_coco \
+        --source_images_dir /outputs \
+        --filter_sources coco \
+        --splits train
+
+    # Mode 2: Mapping file (all datasets)
+    python scripts/prepare_fire_sharegpt.py \
+        --output_dir /outputs/fire_bc_full \
+        --mapping_file /outputs/fire_image_mapping.json \
+        --splits train test
+
+    # Mode 3: Testing only
+    python scripts/prepare_fire_sharegpt.py \
+        --output_dir /outputs/fire_bc_test \
+        --skip-images \
+        --max_samples 100
 """
 
 import argparse
@@ -68,6 +85,12 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Directory containing pre-downloaded source images (e.g., /outputs with coco/, mathvista/ subdirs). Samples without images will be skipped.",
+    )
+    parser.add_argument(
+        "--mapping_file",
+        type=str,
+        default=None,
+        help="Path to FIRE image mapping JSON (from build_fire_image_mapping.py). Enables efficient loading from HuggingFace datasets by index.",
     )
     parser.add_argument(
         "--filter_sources",
@@ -221,48 +244,181 @@ def extract_answer_from_response(response_value: str) -> str:
 
 
 def extract_feedback_text(feedback_value: str) -> str:
-    """Extract feedback text and prepend score information.
+    """Extract feedback text from teacher response.
 
     Teacher feedback in FIRE format looks like:
     'Score: 6.\nFeedback: ...\n'
 
-    We extract the score and feedback, then format as:
-    'A score of 6 is given to the answer. ...'
+    We extract just the feedback part, without prepending the score.
     """
     if not feedback_value:
         return ""
 
-    score = None
-    feedback = ""
-
-    # Extract score
-    if "Score:" in feedback_value:
-        score_part = feedback_value.split("Score:", 1)[1]
-        # Extract the number (handle formats like "Score: 6." or "Score: 6")
-        score_str = score_part.split("\n")[0].strip().rstrip(".")
-        try:
-            score = int(score_str)
-        except ValueError:
-            # If score is not a simple integer, try to parse as float
-            try:
-                score = float(score_str)
-            except ValueError:
-                score = None
-
-    # Extract feedback
+    # Extract feedback after "Feedback:" marker
     if "Feedback:" in feedback_value:
         feedback = feedback_value.split("Feedback:", 1)[1].strip()
-    elif score is None:
-        # If no "Feedback:" marker and no score, return as is
-        return feedback_value.strip()
-
-    # Build final feedback with score prepended
-    if score is not None and feedback:
-        return f"A score of {score} is given to the answer. {feedback}"
-    elif feedback:
         return feedback
-    else:
-        return feedback_value.strip()
+
+    # If no "Feedback:" marker, return as is
+    return feedback_value.strip()
+
+
+class LazyImageLoader:
+    """Lazy image loader that loads images on-demand from HuggingFace datasets.
+
+    This avoids loading all images into memory at once, preventing OOM errors.
+    Dataset handles are cached, but images are loaded only when requested.
+    """
+
+    def __init__(self, mapping_file: Path, cache_dir: str = "/cache"):
+        """Initialize lazy loader with mapping file.
+
+        Args:
+            mapping_file: Path to mapping JSON from build_fire_image_mapping.py
+            cache_dir: HuggingFace cache directory
+        """
+        logger.info(f"Loading mapping from {mapping_file}")
+        with open(mapping_file, 'r') as f:
+            self.mapping = json.load(f)
+
+        self.cache_dir = cache_dir
+        self.dataset_cache = {}  # Cache dataset handles, not images
+        self.stats = {"hits": 0, "misses": 0, "errors": 0}
+
+        logger.info(f"Mapping loaded: {len(self.mapping)} paths mapped")
+
+    def get(self, fire_path: str):
+        """Get image for a FIRE path, loading on-demand.
+
+        Args:
+            fire_path: FIRE image path (e.g., "coco/train2014/COCO_train2014_000000123456.jpg")
+
+        Returns:
+            PIL Image or None if not found
+        """
+        if fire_path not in self.mapping:
+            self.stats["misses"] += 1
+            return None
+
+        entry = self.mapping[fire_path]
+
+        # Handle local file paths (for manually downloaded datasets)
+        if "local_path" in entry:
+            try:
+                from PIL import Image
+                local_path = entry["local_path"]
+                self.stats["hits"] += 1
+                return Image.open(local_path)
+            except Exception as e:
+                logger.error(f"Failed to load local image {entry['local_path']}: {e}")
+                self.stats["errors"] += 1
+                return None
+
+        # Handle HuggingFace datasets
+        dataset_id = entry["dataset"]
+        config = entry.get("config")
+        split = entry["split"]
+        index = entry["index"]
+
+        # Cache key for dataset
+        cache_key = (dataset_id, config, split)
+
+        # Load dataset if not cached
+        if cache_key not in self.dataset_cache:
+            try:
+                logger.info(f"Loading dataset: {dataset_id} ({split})")
+                if config:
+                    ds = load_dataset(dataset_id, config, split=split, cache_dir=self.cache_dir, trust_remote_code=True)
+                else:
+                    ds = load_dataset(dataset_id, split=split, cache_dir=self.cache_dir, trust_remote_code=True)
+                self.dataset_cache[cache_key] = ds
+                logger.info(f"Dataset cached: {dataset_id} ({len(ds)} samples)")
+            except Exception as e:
+                logger.error(f"Failed to load dataset {dataset_id}: {e}")
+                self.stats["errors"] += 1
+                return None
+
+        # Get image from cached dataset
+        try:
+            ds = self.dataset_cache[cache_key]
+            if index < len(ds) and 'image' in ds[index]:
+                self.stats["hits"] += 1
+                return ds[index]['image']
+            else:
+                self.stats["misses"] += 1
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load image {fire_path} at index {index}: {e}")
+            self.stats["errors"] += 1
+            return None
+
+    def get_stats(self):
+        """Get loader statistics."""
+        total = self.stats["hits"] + self.stats["misses"] + self.stats["errors"]
+        return {
+            "total_requests": total,
+            "hits": self.stats["hits"],
+            "misses": self.stats["misses"],
+            "errors": self.stats["errors"],
+            "hit_rate": f"{self.stats['hits']/total*100:.1f}%" if total > 0 else "0%",
+            "datasets_cached": len(self.dataset_cache)
+        }
+
+
+def load_images_from_source_dir(source_dir: Path, needed_paths: set) -> dict:
+    """Load images from pre-downloaded directory structure.
+
+    Args:
+        source_dir: Root directory containing dataset subdirs (e.g., coco/, gqa/)
+        needed_paths: Set of FIRE image paths needed
+
+    Returns:
+        Dict mapping FIRE paths to absolute path strings
+    """
+    logger.info(f"Loading images from source directory: {source_dir}")
+
+    source_images = {}
+    missing = []
+
+    for img_path in needed_paths:
+        full_path = source_dir / img_path
+        if full_path.exists():
+            source_images[img_path] = str(full_path)
+        else:
+            missing.append(img_path)
+
+    logger.info(f"Found {len(source_images)}/{len(needed_paths)} images")
+    if missing:
+        logger.warning(f"Missing {len(missing)} images")
+        for path in missing[:5]:
+            logger.warning(f"  - {path}")
+        if len(missing) > 5:
+            logger.warning(f"  ... and {len(missing) - 5} more")
+
+    return source_images
+
+
+def count_rounds_in_sample(sample: dict) -> int:
+    """Count the number of conversation rounds in a FIRE sample.
+
+    A round is a student response (optionally followed by teacher feedback).
+
+    Args:
+        sample: FIRE dataset sample
+
+    Returns:
+        Number of conversation rounds (0 if none)
+    """
+    conversations = sample.get("conversations", [])
+    if not conversations:
+        return 0
+
+    rounds = 0
+    for turn in conversations:
+        if turn.get("role") == "student" and turn.get("type") == "response":
+            rounds += 1
+
+    return rounds
 
 
 def parse_fire_to_sharegpt(
@@ -374,6 +530,7 @@ def process_split(
     skip_images: bool = False,
     system_prompt: str = "",
     source_images_dir: Path | None = None,
+    mapping_file: Path | None = None,
     filter_sources: list[str] | None = None,
 ) -> dict:
     """Process a single dataset split.
@@ -388,6 +545,9 @@ def process_split(
         image_quality: JPEG quality for saved images
         skip_images: Skip image processing for testing
         system_prompt: System prompt to include in each conversation
+        source_images_dir: Directory with pre-downloaded images
+        mapping_file: JSON mapping from build_fire_image_mapping.py
+        filter_sources: Only process these sources (e.g., ['coco'])
 
     Returns:
         Dictionary of processing statistics
@@ -430,27 +590,8 @@ def process_split(
                     continue
             needed_image_paths.add(img_path)
 
-    # Log filtering info
-    if filter_sources:
-        logger.info(f"Filtering to only process sources: {filter_sources}")
 
-    # Categorize images by source
-    coco_paths = {p for p in needed_image_paths if p.startswith('coco/')}
-    mathvista_paths = {p for p in needed_image_paths if p.startswith('mathvista/')}
-    # Also include "images/" paths as MathVista (inconsistent path format in FIRE dataset)
-    images_only_paths = {p for p in needed_image_paths if p.startswith('images/')}
-    other_paths = needed_image_paths - coco_paths - mathvista_paths - images_only_paths
-
-    logger.info(f"Need {len(needed_image_paths)} unique images total:")
-    logger.info(f"  - COCO: {len(coco_paths)}")
-    logger.info(f"  - MathVista: {len(mathvista_paths)}")
-    if images_only_paths:
-        logger.info(f"  - MathVista (alt format): {len(images_only_paths)}")
-        mathvista_paths.update(images_only_paths)  # Add to mathvista set
-    if other_paths:
-        logger.warning(f"  - Unknown sources: {len(other_paths)}")
-
-    # Initialize stats early
+    # Initialize stats
     stats = {
         "split": split,
         "samples_processed": 0,
@@ -461,144 +602,34 @@ def process_split(
         "total_rounds": 0,
         "images_saved": 0,
         "errors": [],
+        # Round-based breakdown
+        "rounds_breakdown": {
+            "processed": {},  # {num_rounds: count}
+            "skipped": {}     # {num_rounds: count}
+        },
     }
 
-    # Load images from source datasets (or skip if requested)
+    logger.info(f"Need {len(needed_image_paths)} unique images")
+    if filter_sources:
+        logger.info(f"Filtering to sources: {filter_sources}")
+
+    # Load images based on mode
     source_images = {}
+    lazy_loader = None
 
     if skip_images:
-        logger.warning(f"Skipping image loading (--skip-images flag set)")
-        logger.warning(f"Image paths will be placeholders for testing only!")
+        logger.warning("Skipping image loading (--skip-images mode)")
+        logger.warning("Image paths will be placeholders for testing!")
     elif source_images_dir:
-        # Use pre-downloaded images
-        logger.info(f"Using pre-downloaded images from: {source_images_dir}")
-
-        # Check all needed image paths exist
-        missing_images = []
-        for img_path in needed_image_paths:
-            source_path = source_images_dir / img_path
-            if source_path.exists():
-                source_images[img_path] = str(source_path)
-            else:
-                missing_images.append(img_path)
-
-        logger.info(f"Found {len(source_images)}/{len(needed_image_paths)} images in source directory")
-        if missing_images:
-            logger.warning(f"Missing {len(missing_images)} images:")
-            for missing in missing_images[:10]:
-                logger.warning(f"  - {missing}")
-            if len(missing_images) > 10:
-                logger.warning(f"  ... and {len(missing_images) - 10} more")
+        source_images = load_images_from_source_dir(source_images_dir, needed_image_paths)
+    elif mapping_file:
+        # Use lazy loader to avoid loading all images into memory at once
+        lazy_loader = LazyImageLoader(mapping_file)
+        logger.info("Using lazy image loading (on-demand, memory efficient)")
     else:
-        # Load COCO images if needed
-        if coco_paths:
-            logger.info(f"Loading COCO dataset to fetch {len(coco_paths)} images...")
-            logger.warning(f"This may take a long time for the first run...")
-
-            try:
-                coco_train = load_dataset("detection-datasets/coco", split="train", streaming=True)
-                coco_val = load_dataset("detection-datasets/coco", split="val", streaming=True)
-
-                # Search for needed images in COCO train
-                for coco_sample in tqdm(coco_train, desc="Searching COCO train"):
-                    if 'image' in coco_sample and 'image_id' in coco_sample:
-                        filename = f"{coco_sample['image_id']:012d}.jpg"
-                        img_path = f"coco/train2017/{filename}"
-                        if img_path in coco_paths:
-                            source_images[img_path] = coco_sample['image']
-                            if len([p for p in source_images if p.startswith('coco/')]) >= len(coco_paths):
-                                break
-
-                # Search COCO validation set if needed
-                coco_found = len([p for p in source_images if p.startswith('coco/')])
-                if coco_found < len(coco_paths):
-                    for coco_sample in tqdm(coco_val, desc="Searching COCO val"):
-                        if 'image' in coco_sample and 'image_id' in coco_sample:
-                            filename = f"{coco_sample['image_id']:012d}.jpg"
-                            img_path = f"coco/val2017/{filename}"
-                            if img_path in coco_paths:
-                                source_images[img_path] = coco_sample['image']
-                                if len([p for p in source_images if p.startswith('coco/')]) >= len(coco_paths):
-                                    break
-
-                coco_found = len([p for p in source_images if p.startswith('coco/')])
-                logger.info(f"Found {coco_found}/{len(coco_paths)} COCO images")
-            except Exception as e:
-                logger.error(f"Failed to load COCO dataset: {e}")
-                logger.warning(f"Cannot process samples without COCO images")
-
-        # Load MathVista images if needed
-        if mathvista_paths:
-            logger.info(f"Loading MathVista dataset to fetch {len(mathvista_paths)} images...")
-
-            try:
-                # MathVista dataset - try different possible dataset paths
-                mathvista_dataset = None
-                dataset_attempts = [
-                    "AI4Math/MathVista",
-                    "MathVista/MathVista",
-                    "mathvista/MathVista"
-                ]
-
-                for dataset_name in dataset_attempts:
-                    try:
-                        logger.info(f"Trying to load {dataset_name}...")
-                        mathvista_dataset = load_dataset(dataset_name, split="testmini", streaming=True)
-                        logger.info(f"Successfully loaded {dataset_name}")
-                        break
-                    except Exception as e:
-                        logger.debug(f"Failed to load {dataset_name}: {e}")
-                        continue
-
-                if mathvista_dataset is None:
-                    logger.error("Could not load MathVista dataset from any known source")
-                    logger.warning(f"Cannot process {len(mathvista_paths)} samples without MathVista images")
-                else:
-                    # Extract filename to path mapping for MathVista
-                    # Map each base filename to ALL possible path variations
-                    mathvista_filename_to_paths = {}
-                    for path in mathvista_paths:
-                        # Extract filename from mathvista/images/123.jpg or images/123.jpg
-                        filename = path.split('/')[-1]
-                        if filename not in mathvista_filename_to_paths:
-                            mathvista_filename_to_paths[filename] = []
-                        mathvista_filename_to_paths[filename].append(path)
-
-                    # Search MathVista dataset
-                    for mv_sample in tqdm(mathvista_dataset, desc="Searching MathVista"):
-                        # MathVista samples have 'image' field and potentially 'pid' or similar
-                        if 'image' in mv_sample:
-                            # Try to match by filename - MathVista might have different field names
-                            # Common patterns: 'pid', 'question_id', 'image_path', etc.
-                            sample_id = None
-                            for id_field in ['pid', 'question_id', 'id', 'image_id']:
-                                if id_field in mv_sample:
-                                    sample_id = str(mv_sample[id_field])
-                                    break
-
-                            if sample_id:
-                                # Try matching with .jpg extension
-                                for ext in ['.jpg', '.png', '.jpeg', '']:
-                                    test_filename = f"{sample_id}{ext}"
-                                    if test_filename in mathvista_filename_to_paths:
-                                        # Store image under ALL path variations for this filename
-                                        for img_path in mathvista_filename_to_paths[test_filename]:
-                                            source_images[img_path] = mv_sample['image']
-                                        break
-
-                        # Check if we found all MathVista images
-                        mathvista_found = len([p for p in source_images if p.startswith('mathvista/') or p.startswith('images/')])
-                        if mathvista_found >= len(mathvista_paths):
-                            break
-
-                    mathvista_found = len([p for p in source_images if p.startswith('mathvista/') or p.startswith('images/')])
-                    logger.info(f"Found {mathvista_found}/{len(mathvista_paths)} MathVista images")
-
-            except Exception as e:
-                logger.error(f"Failed to load MathVista dataset: {e}")
-                logger.warning(f"Cannot process samples without MathVista images")
-
-        logger.info(f"Total images loaded: {len(source_images)}/{len(needed_image_paths)}")
+        logger.error("No image source specified!")
+        logger.error("Use one of: --source_images_dir, --mapping_file, or --skip-images")
+        raise ValueError("Must specify image source: --source_images_dir, --mapping_file, or --skip-images")
 
     output_file = output_dir / f"fire_sharegpt_{split}.jsonl"
 
@@ -614,11 +645,16 @@ def process_split(
             sample_id = f"{split}_{idx:06d}"
 
             try:
+                # Count rounds in this sample
+                num_rounds = count_rounds_in_sample(sample)
+
                 # Get image path from FIRE sample
                 image_path_ref = sample.get("image")
                 if image_path_ref is None or not isinstance(image_path_ref, str):
                     stats["samples_skipped"] += 1
                     stats["samples_no_image"] += 1
+                    # Track rounds for skipped samples
+                    stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
                     if len(stats["errors"]) < 100:
                         stats["errors"].append(f"{sample_id}: No image path")
                     continue
@@ -629,64 +665,63 @@ def process_split(
                     if source not in filter_sources:
                         stats["samples_skipped"] += 1
                         stats["samples_filtered_by_source"] += 1
+                        # Track rounds for skipped samples
+                        stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
                         continue
 
-                # Handle image based on skip_images flag
+                # Get image for this sample
                 if skip_images:
-                    # Use placeholder path for testing
+                    # Placeholder mode for testing
                     image_save_path = f"/placeholder/images/{split}/{sample_id}.jpg"
                     stats["images_saved"] += 1
-                elif source_images_dir:
-                    # When using pre-downloaded images, reference original paths directly (no copy)
-                    image = source_images.get(image_path_ref)
-
-                    # If not found, try alternative path formats
-                    if image is None and image_path_ref.startswith('images/'):
-                        # Try with mathvista/ prefix (for paths like "images/123.jpg")
-                        alt_path = f"mathvista/{image_path_ref}"
-                        image = source_images.get(alt_path)
-                        if image is not None:
-                            image_path_ref = alt_path
-                            image = source_images.get(alt_path)
-
-                    if image is None:
-                        stats["samples_skipped"] += 1
-                        stats["samples_no_image"] += 1
-                        if len(stats["errors"]) < 100:
-                            stats["errors"].append(f"{sample_id}: Image not found: {image_path_ref}")
-                        continue
-
-                    # Image is already a path string - use directly (no copy)
-                    image_save_path = image
-                    stats["images_saved"] += 1
                 else:
-                    # Download from HuggingFace and save to disk
-                    image = source_images.get(image_path_ref)
+                    # Look up image from loaded sources or lazy loader
+                    if lazy_loader:
+                        # Lazy loading mode - load on demand
+                        image = lazy_loader.get(image_path_ref)
 
-                    # If not found, try alternative path formats
-                    if image is None and image_path_ref.startswith('images/'):
-                        # Try with mathvista/ prefix (for paths like "images/123.jpg")
-                        alt_path = f"mathvista/{image_path_ref}"
-                        image = source_images.get(alt_path)
-                        if image is not None:
-                            image_path_ref = alt_path
+                        # Try alternative path formats if not found
+                        if image is None and image_path_ref.startswith('images/'):
+                            alt_path = f"mathvista/{image_path_ref}"
+                            image = lazy_loader.get(alt_path)
+                            if image is not None:
+                                image_path_ref = alt_path
+                    else:
+                        # Pre-loaded mode (source_images_dir)
+                        image = source_images.get(image_path_ref)
+
+                        # Try alternative path formats if not found
+                        if image is None and image_path_ref.startswith('images/'):
+                            alt_path = f"mathvista/{image_path_ref}"
+                            image = source_images.get(alt_path)
+                            if image is not None:
+                                image_path_ref = alt_path
 
                     if image is None:
                         stats["samples_skipped"] += 1
                         stats["samples_no_image"] += 1
+                        # Track rounds for skipped samples
+                        stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
                         if len(stats["errors"]) < 100:
                             stats["errors"].append(f"{sample_id}: Image not found: {image_path_ref}")
                         continue
 
-                    # Save image to disk (image is a PIL Image object)
-                    image_save_path = str(split_image_dir / f"{sample_id}.jpg")
-                    if not save_image(image, image_save_path, image_quality):
-                        stats["samples_skipped"] += 1
-                        if len(stats["errors"]) < 100:
-                            stats["errors"].append(f"{sample_id}: Image save failed")
-                        continue
-
-                    stats["images_saved"] += 1
+                    # Handle based on image type
+                    if isinstance(image, str):
+                        # Path string from source_images_dir - reference directly
+                        image_save_path = image
+                        stats["images_saved"] += 1
+                    else:
+                        # PIL Image from mapping - save to disk
+                        image_save_path = str(split_image_dir / f"{sample_id}.jpg")
+                        if not save_image(image, image_save_path, image_quality):
+                            stats["samples_skipped"] += 1
+                            # Track rounds for skipped samples
+                            stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                            if len(stats["errors"]) < 100:
+                                stats["errors"].append(f"{sample_id}: Image save failed")
+                            continue
+                        stats["images_saved"] += 1
 
                 # Generate ShareGPT format
                 sharegpt_example = parse_fire_to_sharegpt(
@@ -696,6 +731,8 @@ def process_split(
                 if not sharegpt_example:
                     stats["samples_skipped"] += 1
                     stats["samples_no_conversations"] += 1
+                    # Track rounds for skipped samples
+                    stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
                     if len(stats["errors"]) < 100:
                         stats["errors"].append(f"{sample_id}: No valid conversations")
                     continue
@@ -706,15 +743,37 @@ def process_split(
                 stats["samples_processed"] += 1
                 # Count conversation rounds
                 stats["total_rounds"] += len(sharegpt_example["conversation"])
+                # Track rounds for processed samples
+                stats["rounds_breakdown"]["processed"][num_rounds] = stats["rounds_breakdown"]["processed"].get(num_rounds, 0) + 1
 
             except Exception as e:
                 stats["samples_skipped"] += 1
+                # Track rounds for skipped samples (use num_rounds if available, else 0)
+                try:
+                    num_rounds = count_rounds_in_sample(sample)
+                except:
+                    num_rounds = 0
+                stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
                 if len(stats["errors"]) < 100:
                     stats["errors"].append(f"{sample_id}: {str(e)}")
                 logger.warning(f"Error processing sample {idx}: {e}")
                 continue
 
     logger.info(f"Wrote {stats['samples_processed']} conversations to {output_file}")
+
+    # Log lazy loader stats if used
+    if lazy_loader:
+        loader_stats = lazy_loader.get_stats()
+        logger.info("=" * 60)
+        logger.info("Lazy Loader Statistics:")
+        logger.info(f"  Total requests: {loader_stats['total_requests']}")
+        logger.info(f"  Hits: {loader_stats['hits']}")
+        logger.info(f"  Misses: {loader_stats['misses']}")
+        logger.info(f"  Errors: {loader_stats['errors']}")
+        logger.info(f"  Hit rate: {loader_stats['hit_rate']}")
+        logger.info(f"  Datasets cached: {loader_stats['datasets_cached']}")
+        logger.info("=" * 60)
+
     return stats
 
 
@@ -738,6 +797,7 @@ def main():
     all_stats = {}
 
     source_images_dir = Path(args.source_images_dir) if args.source_images_dir else None
+    mapping_file = Path(args.mapping_file) if args.mapping_file else None
 
     for split in args.splits:
         stats = process_split(
@@ -751,6 +811,7 @@ def main():
             skip_images=args.skip_images,
             system_prompt=args.system_prompt,
             source_images_dir=source_images_dir,
+            mapping_file=mapping_file,
             filter_sources=args.filter_sources,
         )
         all_stats[split] = stats
@@ -783,6 +844,25 @@ def main():
         logger.info(f"  Total conversation rounds: {stats['total_rounds']}")
         logger.info(f"  Avg rounds/sample: {avg_rounds:.2f}")
         logger.info(f"  Images saved: {stats['images_saved']}")
+
+        # Round-based breakdown
+        logger.info(f"\n  Rounds Breakdown (Processed):")
+        processed_breakdown = stats.get("rounds_breakdown", {}).get("processed", {})
+        if processed_breakdown:
+            for num_rounds in sorted(processed_breakdown.keys()):
+                count = processed_breakdown[num_rounds]
+                logger.info(f"    {num_rounds} round(s): {count} samples")
+        else:
+            logger.info(f"    No samples processed")
+
+        logger.info(f"\n  Rounds Breakdown (Skipped):")
+        skipped_breakdown = stats.get("rounds_breakdown", {}).get("skipped", {})
+        if skipped_breakdown:
+            for num_rounds in sorted(skipped_breakdown.keys()):
+                count = skipped_breakdown[num_rounds]
+                logger.info(f"    {num_rounds} round(s): {count} samples")
+        else:
+            logger.info(f"    No samples skipped")
 
         total_processed += stats["samples_processed"]
         total_skipped += stats["samples_skipped"]

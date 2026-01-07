@@ -1,0 +1,180 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qwen2-5vl-7b-fire-full-sft-8gpu-job
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: fire-full-sft
+        model: qwen2-5-vl-7b
+        gpu: a100
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: ms-swift-trainer
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+        command: ["/bin/bash"]
+        args:
+        - "-c"
+        - |
+          echo "========================================="
+          echo "FIRE Full Fine-Tuning (8 GPUs)"
+          echo "Full Parameter Update for Qwen2.5-VL-7B"
+          echo "========================================="
+          echo ""
+
+          # Verify dataset exists
+          if [ ! -f "${DATASET_PATH}" ]; then
+            echo "ERROR: Training dataset not found!"
+            echo "Expected: ${DATASET_PATH}"
+            echo ""
+            echo "Please ensure the dataset file exists."
+            exit 1
+          fi
+
+          echo "Found dataset:"
+          ls -lh "${DATASET_PATH}"
+          wc -l "${DATASET_PATH}"
+          echo ""
+
+          # GPU verification
+          echo "GPU Status:"
+          nvidia-smi
+          echo ""
+
+          # Start training
+          echo "Starting full fine-tuning..."
+          echo ""
+          /workspace/scripts/run_full_sft_qwen3vl_fire_8gpu.sh
+
+        resources:
+          requests:
+            nvidia.com/a100: "8"
+            memory: "64Gi"
+            cpu: "8"
+          limits:
+            nvidia.com/a100: "8"
+            memory: "64Gi"
+            cpu: "8"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: dev-shm
+          mountPath: /dev/shm
+
+        env:
+        # HuggingFace token (required for gated models)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Cache directories (from scripts/env.sh)
+        - name: HF_HOME
+          value: "/cache/hf"
+        - name: TRANSFORMERS_CACHE
+          value: "/cache/hf/transformers"
+        - name: HF_DATASETS_CACHE
+          value: "/cache/hf/datasets"
+        - name: TORCH_HOME
+          value: "/cache/torch"
+        - name: PIP_CACHE_DIR
+          value: "/cache/pip"
+        - name: OUTPUT_DIR
+          value: "/outputs"
+
+        # Model configuration
+        - name: MODEL_ID
+          value: "Qwen/Qwen2.5-VL-7B-Instruct"
+        - name: DATASET_PATH
+          value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
+
+        # Sequence configuration
+        - name: MAX_LEN
+          value: "8192"
+        - name: IMAGE_MAX_TOKEN_NUM
+          value: "2048"
+
+
+        # Training hyperparameters (configurable)
+        - name: BATCH
+          value: "4"           # Per-GPU batch size (adjust based on memory)
+        - name: GRAD_ACC
+          value: "8"           # Gradient accumulation steps
+        - name: EPOCHS
+          value: "100"           # Number of training epochs
+        - name: LR
+          value: "5e-6"        # Learning rate (lower for full fine-tuning)
+        - name: WARMUP_RATIO
+          value: "0.03"        # Warmup ratio
+        - name: WEIGHT_DECAY
+          value: "0.01"        # Weight decay
+        - name: MAX_GRAD_NORM
+          value: "1.0"         # Gradient clipping
+        - name: LOSS_SCALE
+          value: "last_round"
+
+        # DDP configuration
+        - name: NPROC
+          value: "8"           # Number of GPUs
+
+        # Output configuration
+        - name: RUN_NAME
+          value: "qwen2_5vl-7b-fire-full-sft-8gpu"
+
+        # Logging configuration
+        - name: LOGGING_STEPS
+          value: "10"
+        - name: EVAL_STEPS
+          value: "20"
+        - name: SAVE_STEPS
+          value: "25"
+        - name: SAVE_TOTAL_LIMIT
+          value: "2"
+
+        # Python and CUDA settings
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+      tolerations:
+        - effect: NoSchedule
+          key: nautilus.io/hardware
+          operator: Equal
+          value: large-gpu
+        - effect: PreferNoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - NVIDIA-A100-SXM4-80GB
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Gi

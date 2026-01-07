@@ -1,44 +1,55 @@
-# ms-swift Kubernetes 2-GPU DDP Training
+# VLM Self-Reflection - Production Training Platform
 
-Reproducible Kubernetes Job for 2-GPU DDP (Distributed Data Parallel) fine-tuning with ms-swift on Qwen3-8B.
+Production-ready Kubernetes platform for Vision-Language Model (VLM) fine-tuning with multiple training paradigms and optimized Docker build system.
 
 ## Overview
 
-This project provides a production-ready setup for fine-tuning Qwen3-8B using:
-- **Framework**: ms-swift with LoRA for memory efficiency
-- **Training**: 2-GPU single-node DDP with torchrun
-- **Dataset**: HuggingFace Alpaca GPT4 (smoke test with 500 samples, scalable to full dataset)
-- **Storage**: Dual-PVC strategy optimized for Rook-Ceph
+This project provides a complete production setup for VLM fine-tuning with:
+- **Framework**: ms-swift with LoRA/Full fine-tuning support
+- **Training Paradigms**: Standard SFT, FIRE behavior cloning, full parameter fine-tuning
+- **Scale**: 2-GPU DDP, 4-GPU, and 8-GPU multi-GPU training
+- **Models**: Qwen2.5-VL-7B, Qwen3-8B, Qwen3-VL-32B
+- **Storage**: Dual-PVC strategy optimized for Kubernetes
+- **Docker**: Two-tier build system (base + app) for 95% faster iterations
 
 ## Project Structure
 
 ```
-.
-├── Dockerfile                          # CUDA 12.1 + ms-swift container
+vlm-self-reflection/
+├── Dockerfile.base                     # Base: CUDA 12.1, PyTorch 2.2.0 (~2GB)
+├── Dockerfile                          # App: ms-swift + scripts (~50-100MB)
+├── build_base.sh                       # Build base image (run rarely)
+├── build_main.sh                       # Build app image (run frequently)
 ├── requirements.txt                    # Python dependencies
-├── .dockerignore                       # Build optimization
-├── README.md                           # Comprehensive documentation (this file)
+├── README.md                           # This file
+├── CLAUDE.md                           # Developer guide
 ├── QUICKSTART.md                       # Quick deployment guide
-├── CLAUDE.md                           # Developer guide for Claude Code
+├── DOCKER_BUILD.md                     # Docker build system guide
+├── GHCR_SETUP.md                       # GitHub Container Registry setup
 ├── scripts/
 │   ├── env.sh                         # Environment configuration
-│   ├── run_sft_ddp.sh                 # 2-GPU DDP training (Qwen3-8B)
+│   ├── run_sft_ddp.sh                 # 2-GPU DDP training
 │   ├── run_sft_single_gpu.sh          # Single-GPU training (dev/test)
-│   ├── run_sft_qwen3vl_fire_4gpu.sh  # 4-GPU FIRE behavior cloning (Qwen3-VL-32B)
-│   ├── prepare_fire_sharegpt.py       # FIRE dataset preprocessing (690 lines)
+│   ├── run_full_sft_qwen3vl_fire_8gpu.sh # 8-GPU full fine-tuning
+│   ├── prepare_fire_sharegpt.py       # FIRE dataset preprocessing
 │   ├── prepare_volcano_sharegpt.py    # Volcano dataset preprocessing
+│   ├── build_fire_image_mapping.py    # FIRE image mapping builder
+│   ├── build_local_image_mapping.py   # Local image mapping
+│   ├── merge_mappings.py              # Merge image mappings
+│   ├── analyze_dataset_lengths.py     # Dataset analysis
 │   └── test_fire_preprocessing.sh     # Local preprocessing test
 ├── k8s/
-│   ├── pvc-cache.yaml                 # linstor-ucsc for cache (500Gi)
-│   ├── pvc-outputs.yaml               # rook-cephfs for checkpoints (500Gi)
-│   ├── job-sft-qwen3-8b-2gpu.yaml    # 2-GPU Qwen3-8B Job
-│   ├── job-preprocess-fire-cpu.yaml   # CPU-only FIRE preprocessing Job
-│   ├── job-sft-qwen3vl-fire-4gpu.yaml # 4-GPU FIRE behavior cloning Job
-│   ├── jupyter-2gpu-test.yaml         # Interactive development pod
+│   ├── pvc-cache.yaml                 # Cache storage (500Gi)
+│   ├── pvc-outputs.yaml               # Output storage (500Gi)
+│   ├── job-preprocess-fire-cpu.yaml   # CPU-only FIRE preprocessing
+│   ├── job-download-fire-images-cpu.yaml # FIRE image downloader
+│   ├── job-full-sft-qwen2-5vl-fire-4gpu.yaml # 4-GPU Qwen2.5-VL-7B
+│   ├── job-full-sft-qwen3vl-fire-8gpu.yaml   # 8-GPU Qwen3-VL full training
+│   ├── jupyter-1gpu-test.yaml         # 1-GPU interactive dev pod
+│   ├── jupyter-2gpu-test.yaml         # 2-GPU interactive dev pod
 │   └── secret-hf-token.yaml.template  # HuggingFace token template
-├── notebooks/
-│   └── dataset_analysis.ipynb         # Dataset exploration and validation
-└── test_fire_local/                   # Local FIRE preprocessing outputs
+└── notebooks/
+    └── dataset_analysis.ipynb         # Dataset exploration
 ```
 
 ## Storage Strategy
@@ -57,17 +68,32 @@ This project provides a production-ready setup for fine-tuning Qwen3-8B using:
 
 ## Quick Start
 
-### 1. Build and Push Container Image
+### 1. Build and Push Container Images (Two-Tier System)
+
+This project uses a two-tier Docker build system for 95% faster iterations:
 
 ```bash
-# Build the Docker image
-docker build -t <your-dockerhub-username>/ms-swift-qwen:latest .
+# STEP 1: Build base image (ONCE - contains CUDA/PyTorch, ~2GB)
+./build_base.sh
+# Defaults to GHCR (ghcr.io/kkuntal990/ms-swift-base:latest)
+# Type 'y' when prompted to push
 
-# Push to Docker Hub
-docker push <your-dockerhub-username>/ms-swift-qwen:latest
+# STEP 2: Build app image (FREQUENTLY - contains your code, ~50-100MB)
+./build_main.sh
+# Builds ghcr.io/kkuntal990/ms-swift-qwen:latest
+# Type 'y' when prompted to push
+
+# Test locally
+docker run --rm -it --gpus all ghcr.io/kkuntal990/ms-swift-qwen:latest bash
 ```
 
-**Important**: Update the image name in `k8s/job-sft-qwen3-8b-2gpu.yaml` with your actual Docker Hub username.
+**Why two images?**
+
+- Base image: Contains PyTorch - build/push once
+- App image: Contains your code - build/push often
+- Saves 95% of push time for iterative development!
+
+**See**: [DOCKER_BUILD.md](DOCKER_BUILD.md) for detailed build system guide, [GHCR_SETUP.md](GHCR_SETUP.md) for GitHub Container Registry setup.
 
 ### 2. Create Storage Resources
 
@@ -93,58 +119,65 @@ kubectl create secret generic hf-token --from-literal=token="hf_your_actual_toke
 kubectl apply -f k8s/secret-hf-token.yaml.template
 ```
 
-### 4. Run Training Job
+### 4. Run Training Jobs
 
-#### Phase 1: Smoke Test (5-15 minutes)
+This project supports multiple training paradigms:
+
+#### Option A: FIRE Dataset Preprocessing + Training (Recommended)
+
+##### Phase 1: Preprocess FIRE Dataset (CPU-only)
 
 ```bash
-# Deploy the job (configured for 500-sample smoke test by default)
-kubectl apply -f k8s/job-sft-qwen3-8b-2gpu.yaml
+# Submit preprocessing job (4-6 hours for full dataset)
+kubectl apply -f k8s/job-preprocess-fire-cpu.yaml
 
 # Monitor progress
-kubectl get jobs
-kubectl logs -f job/qwen3-8b-sft-job
+kubectl logs -f job/fire-preprocess-cpu-job
 
-# Check for successful completion
-kubectl get job qwen3-8b-sft-job
+# Verify completion
+kubectl get job fire-preprocess-cpu-job
+```
+
+##### Phase 2: GPU Training (8-GPU Full Fine-Tuning)
+
+```bash
+# Submit 8-GPU training job (Qwen3-VL full parameter fine-tuning)
+kubectl apply -f k8s/job-full-sft-qwen3vl-fire-8gpu.yaml
+
+# Monitor progress
+kubectl logs -f job/qwen2-5vl-7b-fire-full-sft-8gpu-job
+
+# Check status
+kubectl get job qwen2-5vl-7b-fire-full-sft-8gpu-job
 ```
 
 **Validation checklist**:
-- Model and dataset downloads succeed to `/cache`
-- DDP initializes with 2 ranks
-- Training loss decreases
-- Checkpoint appears in `/outputs/qwen3-8b-sft`
 
-#### Phase 2: Full Dataset Training
+- **Preprocessing**: Dataset JSONL created, images downloaded, stats.json generated
+- **Training**: Model loads, DDP initializes with 8 ranks, training loss decreases
+- **Checkpoints**: Appear in `/outputs/`
 
-After smoke test succeeds, scale to full dataset:
+#### Option B: Interactive Development
+
+Launch Jupyter pod for debugging and experimentation:
 
 ```bash
-# Edit k8s/job-sft-qwen3-8b-2gpu.yaml
-# Change DATASET_ID from:
-#   value: "AI-ModelScope/alpaca-gpt4-data-en#500"
-# To:
-#   value: "AI-ModelScope/alpaca-gpt4-data-en"
+# Deploy Jupyter pod with 2 GPUs
+kubectl apply -f k8s/jupyter-2gpu-test.yaml
 
-# Optional: Adjust other hyperparameters
-#   - EPOCHS: increase from 1 to 3
-#   - MAX_LEN: try 4096 if you have sufficient GPU memory
-#   - GRAD_ACC: adjust for desired effective batch size
+# Access the pod
+kubectl exec -it vlm-jupyter -- bash
 
-# Delete previous job and rerun
-kubectl delete job qwen3-8b-sft-job
-kubectl apply -f k8s/job-sft-qwen3-8b-2gpu.yaml
+# Inside pod: Install and start Jupyter
+pip install jupyter jupyterlab ipywidgets
+jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root \
+  --ServerApp.token='medvae2024' --ServerApp.password=''
 
+# In local terminal: Port forward
+kubectl port-forward vlm-jupyter 8888:8888
+
+# Access http://localhost:8888 in browser
 ```
-
-#### Run  jupyter job for debugging
-
-1. use `kubectl apply -f k8s/jupyter-2gpu-test.yaml`
-2. `kubectl exec -it vlm-jupyter --bash`
-3. `pip install jupyter jupyterlab ipywidgets`
-4. `jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root \                                                                              --ServerApp.token='medvae2024' --ServerApp.password=''`
-5. Now in your local terminal - `kubectl port-forward vlm-jupyter 8888:8888`
-6. Connect to localhost:8888 in your local browser
 
 
 
@@ -167,25 +200,32 @@ kubectl cp $POD_NAME:/outputs/qwen3-8b-sft ./local-checkpoints/
 
 ## Configuration Reference
 
-### Environment Variables
+### Training Jobs Overview
 
-All training parameters can be customized via environment variables in `k8s/job-sft-qwen3-8b-2gpu.yaml`:
+| Job | GPUs | Model | Training Type | Effective Batch |
+| ----- | ------ | ------- | -------------- | ---------------- |
+| `job-preprocess-fire-cpu.yaml` | 0 (CPU) | N/A | Preprocessing | N/A |
+| `job-download-fire-images-cpu.yaml` | 0 (CPU) | N/A | Image download | N/A |
+| `job-full-sft-qwen2-5vl-fire-4gpu.yaml` | 4 | Qwen2.5-VL-7B | Full fine-tuning | 64 |
+| `job-full-sft-qwen3vl-fire-8gpu.yaml` | 8 | Qwen3-VL | Full fine-tuning | 128 |
+
+### Key Environment Variables
+
+**FIRE Full Fine-Tuning (8-GPU)**:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL_ID` | `Qwen/Qwen3-8B` | HuggingFace model identifier |
-| `DATASET_ID` | `AI-ModelScope/alpaca-gpt4-data-en#500` | Dataset (use `#N` for N samples) |
-| `MAX_LEN` | `2048` | Maximum sequence length |
-| `BATCH` | `1` | Batch size per GPU |
-| `GRAD_ACC` | `16` | Gradient accumulation steps |
+| ---------- | --------- | ------------- |
+| `MODEL_ID` | `Qwen/Qwen2.5-VL-7B-Instruct` | HuggingFace model identifier |
+| `DATASET_PATH` | `/outputs/fire_bc/fire_bc_train.jsonl` | Preprocessed FIRE dataset |
+| `MAX_LEN` | `8192` | Maximum sequence length |
+| `BATCH` | `2` | Batch size per GPU |
+| `GRAD_ACC` | `8` | Gradient accumulation steps |
 | `EPOCHS` | `1` | Number of training epochs |
-| `LR` | `2e-4` | Learning rate |
-| `LORA_RANK` | `8` | LoRA rank |
-| `LORA_ALPHA` | `16` | LoRA alpha parameter |
-| `NPROC` | `2` | Number of GPUs |
-| `DTYPE` | `auto` | Data type (auto-detects bf16/fp16) |
+| `LR` | `1e-5` | Learning rate |
+| `NPROC` | `8` | Number of GPUs |
+| `DTYPE` | `bf16` | Data type |
 
-**Effective batch size** = `BATCH × GRAD_ACC × NPROC` = 1 × 16 × 2 = 32 (default)
+**Effective batch size** = `BATCH × GRAD_ACC × NPROC` = 2 × 8 × 8 = 128
 
 ### Resource Requests/Limits
 

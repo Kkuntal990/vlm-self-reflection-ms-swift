@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
 #
-# Behavior Cloning Training Script for Qwen3-VL-32B on FIRE Dataset
+# Full Fine-Tuning Script for Qwen2.5-VL-7B on FIRE Dataset
 #
-# This script implements offline imitation learning via behavior cloning
-# over reflection trajectories, following the RePer paradigm:
+# This script performs FULL parameter fine-tuning (not LoRA) on the
+# FIRE behavior cloning dataset using 8 A100 GPUs.
 #
-#   State  = (image, question, previous attempts, previous feedback)
-#   Action = next student response
-#   Loss   = cross-entropy on expert action given state
-#
-# Even though we use standard SFT tooling, this is NOT "just SFT" - it is
-# trajectory-level behavior cloning where each timestep is a training example.
-#
-# Hardware: 4 × A100 80GB (single node DDP)
-# Model: Qwen/Qwen3-VL-32B-Instruct with LoRA
+# Hardware: 8 × A100 80GB (single node DDP)
+# Model: Qwen/Qwen2.5-VL-7B-Instruct with full parameter updates
 #
 set -euo pipefail
 
@@ -23,13 +16,13 @@ source /workspace/scripts/env.sh
 # ============================================
 # Model Configuration
 # ============================================
-MODEL_ID="${MODEL_ID:-Qwen/Qwen3-VL-32B-Instruct}"
+MODEL_ID="${MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct}"
 
 # ============================================
-# Dataset Configuration (Behavior Cloning JSONL)
+# Dataset Configuration
 # ============================================
-DATASET_PATH="${DATASET_PATH:-/outputs/fire_bc/fire_bc_train.jsonl}"
-VAL_DATASET_PATH="${VAL_DATASET_PATH:-/outputs/fire_bc/fire_bc_test.jsonl}"
+DATASET_PATH="${DATASET_PATH:-/outputs/fire_bc/fire_sharegpt_train.jsonl}"
+VAL_DATASET_PATH="${VAL_DATASET_PATH:-/outputs/fire_bc/fire_sharegpt_test.jsonl}"
 
 # ============================================
 # Sequence and Vision Configuration
@@ -44,43 +37,34 @@ export PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True'
 # ============================================
 # Training Hyperparameters
 # ============================================
-# Batch size reduced for 32B model (memory constraint)
+# Batch size per GPU (adjust based on memory)
 BATCH="${BATCH:-1}"
-# Gradient accumulation increased to maintain effective batch size
-GRAD_ACC="${GRAD_ACC:-16}"
-EPOCHS="${EPOCHS:-1}"
-LR="${LR:-1e-4}"
-WARMUP_RATIO="${WARMUP_RATIO:-0.05}"
+# Gradient accumulation to maintain effective batch size
+GRAD_ACC="${GRAD_ACC:-8}"
+EPOCHS="${EPOCHS:-3}"
+LR="${LR:-5e-6}"
+WARMUP_RATIO="${WARMUP_RATIO:-0.03}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
-
-# ============================================
-# LoRA Configuration
-# ============================================
-# Higher rank for complex behavior cloning task
-LORA_RANK="${LORA_RANK:-32}"
-LORA_ALPHA="${LORA_ALPHA:-64}"
-LORA_DROPOUT="${LORA_DROPOUT:-0.05}"
-TARGET_MODULES="${TARGET_MODULES:-all-linear}"
-
+MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
+LOSS_SCALE="${LOSS_SCALE:-last_round}"
 # ============================================
 # DDP Configuration
 # ============================================
-NPROC="${NPROC:-4}"
-PORT="${MASTER_PORT:-29501}"
+NPROC="${NPROC:-8}"
 
 # ============================================
 # Output Configuration
 # ============================================
-RUN_NAME="${RUN_NAME:-qwen3vl-32b-fire-bc}"
+RUN_NAME="${RUN_NAME:-qwen2_5vl-7b-instruct-fire-full-sft}"
 OUTPUT_PATH="${OUTPUT_DIR}/${RUN_NAME}"
 
 # ============================================
 # Logging and Checkpointing
 # ============================================
-LOGGING_STEPS="${LOGGING_STEPS:-10}"
-EVAL_STEPS="${EVAL_STEPS:-500}"
-SAVE_STEPS="${SAVE_STEPS:-500}"
-SAVE_TOTAL_LIMIT="${SAVE_TOTAL_LIMIT:-3}"
+LOGGING_STEPS="${LOGGING_STEPS:-50}"
+EVAL_STEPS="${EVAL_STEPS:-1000}"
+SAVE_STEPS="${SAVE_STEPS:-1000}"
+SAVE_TOTAL_LIMIT="${SAVE_TOTAL_LIMIT:-2}"
 
 # ============================================
 # Auto-detect dtype
@@ -101,7 +85,7 @@ python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available';
 # Verify dataset exists
 if [ ! -f "$DATASET_PATH" ]; then
     echo "ERROR: Training dataset not found: $DATASET_PATH"
-    echo "Run prepare_fire_full_state_jsonl.py first to create the behavior cloning dataset."
+    echo "Please ensure the dataset file exists."
     exit 1
 fi
 
@@ -112,15 +96,13 @@ mkdir -p "${OUTPUT_PATH}"
 # Training Configuration Summary
 # ============================================
 echo "========================================="
-echo "FIRE Behavior Cloning Training"
-echo "Offline Imitation Learning via SFT"
+echo "FIRE Full Fine-Tuning"
+echo "Full Parameter Update (Not LoRA)"
 echo "========================================="
 echo ""
 echo "Model Configuration:"
 echo "  Model: ${MODEL_ID}"
-echo "  Train Type: LoRA"
-echo "  LoRA Rank: ${LORA_RANK} | Alpha: ${LORA_ALPHA}"
-echo "  Target Modules: ${TARGET_MODULES}"
+echo "  Train Type: FULL"
 echo "  Dtype: ${DTYPE}"
 echo ""
 echo "Dataset Configuration:"
@@ -139,6 +121,7 @@ echo "  Effective Batch Size: $((BATCH * GRAD_ACC * NPROC))"
 echo "  Epochs: ${EPOCHS}"
 echo "  Learning Rate: ${LR}"
 echo "  Warmup Ratio: ${WARMUP_RATIO}"
+echo "  Max Grad Norm: ${MAX_GRAD_NORM}"
 echo ""
 echo "Output: ${OUTPUT_PATH}"
 echo "========================================="
@@ -146,15 +129,20 @@ echo "========================================="
 # ============================================
 # Launch Distributed Training
 # ============================================
-torchrun \
-    --nproc_per_node="${NPROC}" \
-    --master_port="${PORT}" \
-    $(which swift) sft \
+# ms-swift handles multi-GPU training internally via NPROC_PER_NODE
+
+# Auto-generate CUDA_VISIBLE_DEVICES based on NPROC
+CUDA_DEVICES=$(seq -s, 0 $((NPROC - 1)))
+
+NPROC_PER_NODE="${NPROC}" \
+CUDA_VISIBLE_DEVICES="${CUDA_DEVICES}" \
+swift sft \
     --model "${MODEL_ID}" \
-    --train_type lora \
+    --train_type full \
     --dataset "${DATASET_PATH}" \
-    --val_dataset "${VAL_DATASET_PATH}" \
+    --split_dataset_ratio 0.1 \
     --max_length "${MAX_LEN}" \
+    --loss_scale "${LOSS_SCALE}" \
     --per_device_train_batch_size "${BATCH}" \
     --per_device_eval_batch_size "${BATCH}" \
     --gradient_accumulation_steps "${GRAD_ACC}" \
@@ -162,10 +150,7 @@ torchrun \
     --learning_rate "${LR}" \
     --warmup_ratio "${WARMUP_RATIO}" \
     --weight_decay "${WEIGHT_DECAY}" \
-    --lora_rank "${LORA_RANK}" \
-    --lora_alpha "${LORA_ALPHA}" \
-    --lora_dropout "${LORA_DROPOUT}" \
-    --target_modules "${TARGET_MODULES}" \
+    --max_grad_norm "${MAX_GRAD_NORM}" \
     --torch_dtype "${DTYPE}" \
     --output_dir "${OUTPUT_PATH}" \
     --logging_steps "${LOGGING_STEPS}" \
@@ -176,16 +161,23 @@ torchrun \
     --gradient_checkpointing true \
     --freeze_vit true \
     --freeze_aligner true \
-    --attn_impl flash_attn \
-    --dataloader_num_workers 4 \
-    --report_to tensorboard
+    --dataloader_num_workers 8 \
+    --dataset_num_proc 8 \
+    --report_to tensorboard \
+    --save_only_model true \
+    --deepspeed zero2 \
+    --group_by_length true \
+    --packing true \
+    --packing_length 4096 \
+    --dataloader_persistent_workers true \
+    --dataloader_prefetch_factor 4
 
 echo ""
 echo "========================================="
 echo "Training completed successfully!"
 echo "========================================="
-echo "Checkpoints saved to: ${OUTPUT_PATH}"
+echo "Model saved to: ${OUTPUT_PATH}"
 echo ""
-echo "To merge LoRA weights for inference:"
-echo "  swift merge --model ${MODEL_ID} --adapter ${OUTPUT_PATH}"
+echo "To use the model for inference:"
+echo "  swift infer --model_dir ${OUTPUT_PATH}"
 echo "========================================="

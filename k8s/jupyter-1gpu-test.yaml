@@ -4,8 +4,8 @@ metadata:
   name: vlm-jupyter-1gpu
 spec:
   restartPolicy: Never
-  imagePullSecrets:
-  - name: ghcr-secret
+  # imagePullSecrets:  # Uncomment if using private Docker Hub images
+  # - name: dockerhub-secret
   containers:
   - name: jupyter-container
     image: ghcr.io/kkuntal990/ms-swift-qwen:latest
@@ -65,11 +65,11 @@ spec:
     - name: GRAD_ACC
       value: "8"
     - name: EPOCHS
-      value: "1000"
+      value: "100"
     - name: LR
       value: "2e-4"
     - name: LORA_RANK
-      value: "8"
+      value: "8" #8,16,32
     - name: LORA_ALPHA
       value: "16"
 

@@ -48,3 +48,22 @@ temp/
 
 # Plan files
 .claude/
+
+# Build scripts and base Dockerfile (not needed in application image)
+build_base.sh
+build_main.sh
+Dockerfile.base
+
+# Test directories
+test_*/
+*_test.py
+
+# Notebooks
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
+# Local outputs and cache (will be mounted as volumes in k8s)
+outputs/
+cache/
+checkpoints/

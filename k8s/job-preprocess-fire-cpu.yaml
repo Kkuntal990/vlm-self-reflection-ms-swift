@@ -26,23 +26,39 @@ spec:
 
           echo "========================================="
           echo "FIRE Dataset Preprocessing (CPU-only)"
-          echo "ShareGPT Format Conversion"
+          echo "ShareGPT Format Conversion with Mapping"
+          echo "Lazy Loading (Memory Efficient)"
           echo "========================================="
           echo ""
           echo "Dataset: ${DATASET_ID}"
-          echo "Splits: train test"
+          echo "Mapping file: /outputs/fire_image_mapping_complete.json"
+          echo "Splits: ${SPLITS}"
           echo "Max samples: ${MAX_SAMPLES} (0 = all)"
           echo ""
 
-          # Run preprocessing (using pre-downloaded images)
+          # Verify mapping file exists
+          if [ ! -f /outputs/fire_image_mapping_complete.json ]; then
+            echo "ERROR: Complete mapping file not found!"
+            echo "Expected: /outputs/fire_image_mapping_complete.json"
+            echo "This should be created by merging HF and local mappings."
+            exit 1
+          fi
+
+          echo "Mapping file found ($(du -h /outputs/fire_image_mapping_complete.json | cut -f1))"
+          echo ""
+
+          # Run preprocessing with complete mapping (HF + local images)
+          # Uses lazy loading for memory efficiency
+          # Includes Vision-FLAN (20,257 images) and GeoQA+ (2,253 images)
+
+          echo "Processing TRAIN and TEST splits with complete mapping..."
           python /workspace/scripts/prepare_fire_sharegpt.py \
             --dataset_id "${DATASET_ID}" \
-            --output_dir /outputs/fire_sharegpt \
-            --image_dir /outputs/fire_images \
-            --source_images_dir /outputs \
+            --output_dir /outputs/fire_preprocessed_v2 \
+            --image_dir /outputs/fire_images_v2 \
+            --mapping_file /outputs/fire_image_mapping_complete.json \
             --max_samples ${MAX_SAMPLES} \
-            --splits train test \
-            --streaming
+            --splits train test
 
           echo ""
           echo "========================================="
@@ -50,17 +66,19 @@ spec:
           echo "========================================="
           echo ""
           echo "Output files:"
-          ls -lh /outputs/fire_sharegpt/
+          ls -lh /outputs/fire_preprocessed_v2/
           echo ""
           echo "Sample counts:"
-          wc -l /outputs/fire_sharegpt/fire_sharegpt_*.jsonl
+          wc -l /outputs/fire_preprocessed_v2/fire_sharegpt_*.jsonl 2>/dev/null || echo "No JSONL files found"
           echo ""
           echo "Statistics:"
-          cat /outputs/fire_sharegpt/stats.json
+          cat /outputs/fire_preprocessed_v2/stats.json
           echo ""
-          echo "First training example:"
-          head -1 /outputs/fire_sharegpt/fire_sharegpt_train.jsonl | python -m json.tool
-          echo ""
+          if [ -f /outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl ]; then
+            echo "First training example:"
+            head -1 /outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl | python -m json.tool
+            echo ""
+          fi
           echo "Ready for training! Submit job-sft-qwen3vl-fire-4gpu.yaml"
           echo "========================================="
 
@@ -78,16 +96,19 @@ spec:
           value: "PengxiangLi/FIRE"
 
         # Preprocessing configuration
+        - name: SPLITS
+          value: "train test"  # Both splits processed with lazy loading
+
         - name: MAX_SAMPLES
-          value: "0"  # 0 = all samples; set to "100" for quick testing
+          value: "0"  # Testing with 100 samples first, then set to "0" for full run
 
         resources:
           requests:
-            memory: "16Gi"
-            cpu: "4"
+            memory: "64Gi"
+            cpu: "2"
           limits:
-            memory: "16Gi"
-            cpu: "4"
+            memory: "64Gi"
+            cpu: "2"
 
         volumeMounts:
         - name: cache-volume

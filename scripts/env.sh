@@ -18,8 +18,6 @@ export HF_HUB_DISABLE_TELEMETRY=1
 
 # DDP / NCCL
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
-export MASTER_ADDR=${MASTER_ADDR:-localhost}
-export MASTER_PORT=${MASTER_PORT:-29501}
 
 # Debug toggles (enable when needed)
 # export NCCL_DEBUG_SUBSYS=ALL

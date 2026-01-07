@@ -38,10 +38,13 @@ spec:
           # 1. Scan FIRE dataset for all image paths
           # 2. Download source datasets to HuggingFace cache
           # 3. Build {fire_path: {dataset, split, index}} mapping
+          # Use --existing_mapping to extend previous run (skips datasets with good coverage)
           python /workspace/scripts/build_fire_image_mapping.py \
             --fire_dataset "PengxiangLi/FIRE" \
             --cache_dir /cache \
             --output_mapping /outputs/fire_image_mapping.json \
+            --existing_mapping /outputs/fire_image_mapping.json \
+            --min_coverage 0.8 \
             --splits train test \
             --max_samples 0
 
@@ -78,10 +81,10 @@ spec:
         resources:
           requests:
             memory: "16Gi"
-            cpu: "4"
+            cpu: "2"
           limits:
-            memory: "32Gi"
-            cpu: "8"
+            memory: "16Gi"
+            cpu: "2"
 
         volumeMounts:
         - name: cache-volume

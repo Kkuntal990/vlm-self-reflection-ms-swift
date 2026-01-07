@@ -52,6 +52,9 @@ outputs/
 cache/
 test_fire_local/
 
+# Downloaded datasets and preprocessed data
+data/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb

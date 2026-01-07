@@ -1,0 +1,62 @@
+# Base image with stable dependencies (CUDA, Python, PyTorch)
+# This image should rarely change - only rebuild when updating CUDA/PyTorch versions
+# Build: docker build -f Dockerfile.base -t <username>/ms-swift-base:latest .
+
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+
+# Prevent interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies (including build tools for DeepSpeed and FlashAttention)
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    python3.10-dev \
+    git \
+    wget \
+    curl \
+    build-essential \
+    libaio-dev \
+    ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.10 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# Pin NumPy to 1.x (required for torch 2.2.0 and flash-attn compatibility)
+RUN pip install --no-cache-dir "numpy<2.0.0"
+
+# Install PyTorch 2.2+ with CUDA 12.1 support (required for transformers>=4.51)
+# This is the largest layer (~2GB) and rarely changes
+# Note: Installing from main PyPI (has CUDA 12.1 wheels for 2.2.0+)
+RUN pip install --no-cache-dir \
+    torch==2.2.0 \
+    torchvision==0.17.0 \
+    torchaudio==2.2.0
+
+# Install flash-attn build dependencies (required when using --no-build-isolation)
+RUN pip install --no-cache-dir psutil packaging ninja
+
+# Install flash-attn for optimized attention (requires torch at build time)
+# This will compile from source and takes ~10-15 minutes
+# Note: --no-build-isolation is required so setup.py can import torch
+RUN pip install --no-cache-dir --no-build-isolation flash-attn>=2.3.0
+
+# Set working directory
+WORKDIR /workspace
+
+# Set environment variables for cache directories
+# These will be overridden by PVC mounts in Kubernetes
+ENV HF_HOME=/cache/hf \
+    TRANSFORMERS_CACHE=/cache/hf/transformers \
+    HF_DATASETS_CACHE=/cache/hf/datasets \
+    TORCH_HOME=/cache/torch \
+    PIP_CACHE_DIR=/cache/pip \
+    OUTPUT_DIR=/outputs
+
+# Default command
+CMD ["/bin/bash"]

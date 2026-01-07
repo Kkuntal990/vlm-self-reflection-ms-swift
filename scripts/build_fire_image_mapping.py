@@ -8,6 +8,7 @@ This allows us to download datasets once and map FIRE paths flexibly.
 import argparse
 import json
 import logging
+import shutil
 from pathlib import Path
 from datasets import load_dataset
 from tqdm import tqdm
@@ -28,16 +29,16 @@ DATASET_SPLIT_MAPPING = {
     ("coco", "val2014"): {"hf_id": "detection-datasets/coco", "split": "val", "id_field": "image_id"},
 
     # GQA
-    ("gqa", "images"): {"hf_id": "lmms-lab/GQA", "config": "train_all_images", "split": "train", "id_field": "imageId"},
+    ("gqa", "images"): {"hf_id": "lmms-lab/GQA", "config": "train_all_images", "split": "train", "id_field": None},
 
     # TextVQA
     ("textvqa", "train_val_images"): {"hf_id": "lmms-lab/textvqa", "split": "train", "id_field": "image_id"},
 
     # DocVQA
-    ("docvqa", "documents"): {"hf_id": "lmms-lab/DocVQA", "config": "DocVQA", "split": "validation", "id_field": "image"},
+    ("docvqa", "documents"): {"hf_id": "lmms-lab/DocVQA", "config": "DocVQA", "split": "validation", "id_field": "ucsf_document_id"},
 
     # ALLaVA
-    ("allava_vflan", "images"): {"hf_id": "FreedomIntelligence/ALLaVA-4V", "config": "allava_vflan", "split": "train", "id_field": None},
+    ("allava_vflan", "images"): {"hf_id": "FreedomIntelligence/ALLaVA-4V", "config": "allava_vflan", "split": "caption", "id_field": None},
 
     # Visual Genome
     ("vg", "VG_100K"): {"hf_id": "visual_genome", "config": "region_descriptions_v1.2.0", "split": "train", "id_field": "image_id"},
@@ -56,33 +57,33 @@ DATASET_SPLIT_MAPPING = {
     # ScienceQA
     ("scienceqa", "images"): {"hf_id": "derek-thomas/ScienceQA", "split": "train", "id_field": None},
 
-    # GeoQA+
-    ("geoqa+", "images"): {"hf_id": "AI4Math/GeoQA_Plus", "split": "train", "id_field": "problem"},
-    ("geoqa+", "test-images"): {"hf_id": "AI4Math/GeoQA_Plus", "split": "test", "id_field": "problem"},
+    # GeoQA+ - DISABLED: Dataset doesn't exist on Hub
+    # ("geoqa+", "images"): {"hf_id": "AI4Math/GeoQA_Plus", "split": "train", "id_field": "problem"},
+    # ("geoqa+", "test-images"): {"hf_id": "AI4Math/GeoQA_Plus", "split": "test", "id_field": "problem"},
 
     # SynthDog-EN
     ("synthdog-en", "images"): {"hf_id": "naver-clova-ix/synthdog-en", "split": "train", "id_field": None},
     ("synthdog-en", "test-images"): {"hf_id": "naver-clova-ix/synthdog-en", "split": "validation", "id_field": None},
 
-    # DVQA
-    ("dvqa", "images"): {"hf_id": "lmms-lab/DVQA", "split": "train", "id_field": "image"},
+    # DVQA - DISABLED: Dataset doesn't exist on Hub
+    # ("dvqa", "images"): {"hf_id": "lmms-lab/DVQA", "split": "train", "id_field": "image"},
 
     # AI2D
-    ("ai2d", "images"): {"hf_id": "lmms-lab/ai2d", "split": "train", "id_field": "image"},
+    ("ai2d", "images"): {"hf_id": "lmms-lab/ai2d", "split": "test", "id_field": "image"},
 
     # MathVerse (multiple versions)
-    ("mathverse", "images_version_1-4"): {"hf_id": "AI4Math/MathVerse", "split": "train", "id_field": "problem"},
-    ("mathverse", "images_version_5"): {"hf_id": "AI4Math/MathVerse", "split": "train", "id_field": "problem"},
-    ("mathverse", "images_version_6"): {"hf_id": "AI4Math/MathVerse", "split": "train", "id_field": "problem"},
+    ("mathverse", "images_version_1-4"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
+    ("mathverse", "images_version_5"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
+    ("mathverse", "images_version_6"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
 
-    # SEED-Bench
+    # SEED-Bench - Re-enabled (should work now, was temporary 502 error)
     ("seedbench", "SEED-Bench-image"): {"hf_id": "lmms-lab/SEED-Bench", "split": "test", "id_field": "question_id"},
 
-    # SAM (Segment Anything)
-    ("sam", "images"): {"hf_id": "facebook/segment-anything-1b", "split": "train", "id_field": None},
+    # SAM (Segment Anything) - DISABLED: Dataset doesn't exist on Hub
+    # ("sam", "images"): {"hf_id": "facebook/segment-anything-1b", "split": "train", "id_field": None},
 
-    # MMMU
-    ("mmmu", "test-images"): {"hf_id": "MMMU/MMMU", "split": "test", "id_field": "id"},
+    # MMMU - DISABLED: Requires config parameter (30 different configs available)
+    # ("mmmu", "test-images"): {"hf_id": "MMMU/MMMU", "split": "test", "id_field": "id"},
 
     # MME (multiple categories)
     ("mme", "landmark"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
@@ -94,23 +95,23 @@ DATASET_SPLIT_MAPPING = {
     ("mme", "existence"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
     ("mme", "OCR"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
 
-    # WikiArt
+    # WikiArt - Re-enabled (should work now, was temporary timeout)
     ("wikiart", "images"): {"hf_id": "huggan/wikiart", "split": "train", "id_field": None},
 
-    # Web-Landmark
-    ("web-landmark", "images"): {"hf_id": "google-research-datasets/web-landmarks", "split": "train", "id_field": None},
+    # Web-Landmark - DISABLED: Dataset doesn't exist on Hub
+    # ("web-landmark", "images"): {"hf_id": "google-research-datasets/web-landmarks", "split": "train", "id_field": None},
 
-    # Web-Celebrity
-    ("web-celebrity", "images"): {"hf_id": "google-research-datasets/web-celebrity", "split": "train", "id_field": None},
+    # Web-Celebrity - DISABLED: Dataset doesn't exist on Hub
+    # ("web-celebrity", "images"): {"hf_id": "google-research-datasets/web-celebrity", "split": "train", "id_field": None},
 
     # ShareGPT4V TextVQA
     ("share_textvqa", "images"): {"hf_id": "lmms-lab/textvqa", "split": "train", "id_field": "image_id"},
 
-    # LLaVA in the Wild
+    # LLaVA in the Wild - Re-enabled (dataset is available on HuggingFace)
     ("llava-in-the-wild", "images"): {"hf_id": "liuhaotian/LLaVA-Instruct-150K", "split": "train", "id_field": "id"},
 
-    # MM-Vet
-    ("mm-vet", "images"): {"hf_id": "lmms-lab/MM-Vet", "split": "test", "id_field": None},
+    # MM-Vet - DISABLED: Dataset doesn't exist on Hub
+    # ("mm-vet", "images"): {"hf_id": "lmms-lab/MM-Vet", "split": "test", "id_field": None},
 }
 
 
@@ -235,6 +236,38 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
     return mapping
 
 
+def calculate_dataset_coverage(mapping: dict, fire_paths: set) -> dict:
+    """Calculate mapping coverage per dataset/split combination.
+
+    Returns:
+        Dict mapping (source, subfolder) to (mapped_count, total_count, coverage%)
+    """
+    coverage = {}
+
+    for (source, subfolder) in DATASET_SPLIT_MAPPING.keys():
+        # Find all FIRE paths for this source/split
+        relevant_paths = {
+            path for path in fire_paths
+            if path.startswith(f"{source}/{subfolder}/")
+        }
+
+        if not relevant_paths:
+            continue
+
+        # Count how many are in the mapping
+        mapped_count = sum(1 for path in relevant_paths if path in mapping)
+        total_count = len(relevant_paths)
+        coverage_pct = (mapped_count / total_count) if total_count > 0 else 0
+
+        coverage[(source, subfolder)] = {
+            "mapped": mapped_count,
+            "total": total_count,
+            "coverage": coverage_pct
+        }
+
+    return coverage
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Build mapping from FIRE image paths to HuggingFace datasets"
@@ -256,6 +289,18 @@ def main():
         type=str,
         default="/outputs/fire_image_mapping.json",
         help="Output mapping file path",
+    )
+    parser.add_argument(
+        "--existing_mapping",
+        type=str,
+        default=None,
+        help="Existing mapping JSON to extend (skips datasets with coverage >= min_coverage)",
+    )
+    parser.add_argument(
+        "--min_coverage",
+        type=float,
+        default=0.8,
+        help="Skip datasets with coverage >= this threshold (0.0-1.0, default 0.8 = 80%%)",
     )
     parser.add_argument(
         "--splits",
@@ -281,16 +326,58 @@ def main():
     # Step 1: Collect all FIRE paths
     fire_paths = collect_fire_paths(args.fire_dataset, args.splits, args.max_samples)
 
-    # Step 2: Build mapping for each source/split
-    full_mapping = {}
+    # Step 2: Load existing mapping if provided
+    existing_mapping = {}
+    skip_datasets = set()
+
+    if args.existing_mapping:
+        logger.info(f"Loading existing mapping from {args.existing_mapping}")
+        with open(args.existing_mapping, 'r') as f:
+            existing_mapping = json.load(f)
+
+        # Calculate coverage for each dataset
+        coverage = calculate_dataset_coverage(existing_mapping, fire_paths)
+
+        logger.info(f"\nExisting mapping coverage (threshold: {args.min_coverage*100:.0f}%):")
+        logger.info("-" * 60)
+
+        for (source, subfolder), stats in sorted(coverage.items()):
+            cov_pct = stats["coverage"] * 100
+            status = "✓ SKIP" if stats["coverage"] >= args.min_coverage else "✗ RETRY"
+
+            logger.info(f"{source:20s}/{subfolder:20s} {stats['mapped']:6d}/{stats['total']:6d} ({cov_pct:5.1f}%) {status}")
+
+            if stats["coverage"] >= args.min_coverage:
+                skip_datasets.add((source, subfolder))
+
+        logger.info("-" * 60)
+        logger.info(f"Skipping {len(skip_datasets)} datasets with good coverage")
+        logger.info(f"Processing {len(DATASET_SPLIT_MAPPING) - len(skip_datasets)} datasets\n")
+
+    # Step 3: Build mapping for each source/split
+    full_mapping = existing_mapping.copy()
+    datasets_processed = 0
 
     for (source, subfolder), config in DATASET_SPLIT_MAPPING.items():
+        if (source, subfolder) in skip_datasets:
+            logger.info(f"⊘ Skipping {source}/{subfolder} (coverage >= {args.min_coverage*100:.0f}%)")
+            continue
+
+        datasets_processed += 1
         mapping = build_mapping_for_source(fire_paths, source, subfolder, config, cache_dir)
         full_mapping.update(mapping)
 
-    # Step 3: Save mapping
+    # Step 4: Save mapping
     output_path = Path(args.output_mapping)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Auto-backup if overwriting existing file
+    if args.existing_mapping and Path(args.existing_mapping).resolve() == output_path.resolve():
+        backup_path = f"{output_path}.backup"
+        if output_path.exists():
+            logger.info(f"Creating backup: {backup_path}")
+            shutil.copy2(output_path, backup_path)
+            logger.info(f"Backup saved ({output_path.stat().st_size / 1024 / 1024:.1f} MB)")
 
     with open(output_path, 'w') as f:
         json.dump(full_mapping, f, indent=2)
@@ -298,10 +385,19 @@ def main():
     logger.info("=" * 60)
     logger.info("MAPPING COMPLETE")
     logger.info("=" * 60)
+    logger.info(f"Datasets processed: {datasets_processed}")
+    logger.info(f"Datasets skipped: {len(skip_datasets)}")
     logger.info(f"Total paths mapped: {len(full_mapping)}")
     logger.info(f"Total paths in FIRE: {len(fire_paths)}")
     logger.info(f"Coverage: {len(full_mapping)/len(fire_paths)*100:.1f}%")
     logger.info(f"Mapping saved to: {output_path}")
+
+    # Mention backup if created
+    if args.existing_mapping and Path(args.existing_mapping).resolve() == output_path.resolve():
+        backup_path = Path(f"{output_path}.backup")
+        if backup_path.exists():
+            logger.info(f"Backup available at: {backup_path}")
+
     logger.info("=" * 60)
 
 
