@@ -1,11 +1,11 @@
-# Two-tier image system: Use pre-built base image with CUDA, Python, and PyTorch
-# Using GitHub Container Registry (ghcr.io)
-# GitHub username: kkuntal990 | Docker Hub username: kkokate990
-FROM ghcr.io/kkuntal990/ms-swift-base:latest
+# Using official ms-swift image from ModelScope
+# This image includes: CUDA 12.8, PyTorch 2.8, Python 3.11, flash-attention, ms-swift 3.10.3, vllm, and more
+# No need to build base image anymore!
+FROM modelscope-registry.cn-hangzhou.cr.aliyuncs.com/modelscope-repo/modelscope:ubuntu22.04-cuda12.8.1-py311-torch2.8.0-vllm0.11.0-modelscope1.31.0-swift3.10.3
 
-# If base image not available, build it first:
-#   ./build_base.sh
-# (defaults to GHCR)
+# Previous two-tier system (now deprecated):
+# - build_base.sh is no longer needed
+# - Dockerfile.base is no longer used
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt /tmp/requirements.txt

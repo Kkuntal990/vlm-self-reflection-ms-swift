@@ -44,7 +44,8 @@ RUN pip install --no-cache-dir psutil packaging ninja
 # Install flash-attn for optimized attention (requires torch at build time)
 # This will compile from source and takes ~10-15 minutes
 # Note: --no-build-isolation is required so setup.py can import torch
-RUN pip install --no-cache-dir --no-build-isolation flash-attn>=2.3.0
+# MAX_JOBS limits parallel compilation to prevent RAM exhaustion (~5.3GB per job)
+RUN MAX_JOBS=12 pip install --no-cache-dir --no-build-isolation flash-attn>=2.3.0
 
 # Set working directory
 WORKDIR /workspace

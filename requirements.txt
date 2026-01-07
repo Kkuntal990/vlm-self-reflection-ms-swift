@@ -1,20 +1,28 @@
 # Core dependencies for ms-swift fine-tuning
-ms-swift
-transformers>=4.51.0,<4.58
-datasets>=3.0,<4.0
-accelerate
+# The official ms-swift docker image already includes:
+# - ms-swift (3.11.3)
+# - transformers (>=4.33,<4.58)
+# - datasets (>=3.0,<4.0)
+# - accelerate
+# - tensorboard
+# - sentencepiece
+# - pillow
+# - tqdm
+# - numpy
+# - vllm (0.11.0)
+
+# Additional dependencies we need to install:
+
+# DeepSpeed for distributed training (NOT included in base ms-swift)
 deepspeed>=0.14.0,<0.18
-tensorboard
-sentencepiece
+
+# Qwen-VL utilities (required for Qwen2.5-VL models)
+qwen-vl-utils>=0.0.14
+
+# Protobuf for model serialization
 protobuf
-numpy<2.0.0
-qwen-vl-utils
 
-# Image processing for FIRE dataset preprocessing
-pillow
-tqdm
-
-# Jupyter for interactive development
+# Jupyter for interactive development (optional, not in base image)
 jupyter
 jupyterlab
 ipywidgets
