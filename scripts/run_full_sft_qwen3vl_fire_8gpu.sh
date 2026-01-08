@@ -171,7 +171,7 @@ swift sft \
     --packing_length 4096 \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
-    --attn_impl flash_attention_3
+    --attn_impl flash_attn
 
 echo ""
 echo "========================================="

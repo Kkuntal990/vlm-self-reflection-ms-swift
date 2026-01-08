@@ -56,11 +56,11 @@ spec:
           requests:
             nvidia.com/a100: "8"
             memory: "64Gi"
-            cpu: "8"
+            cpu: "16"
           limits:
             nvidia.com/a100: "8"
             memory: "64Gi"
-            cpu: "8"
+            cpu: "16"
 
         volumeMounts:
         - name: cache-volume
@@ -134,11 +134,11 @@ spec:
 
         # Logging configuration
         - name: LOGGING_STEPS
-          value: "10"
+          value: "50"
         - name: EVAL_STEPS
-          value: "20"
+          value: "2500"
         - name: SAVE_STEPS
-          value: "25"
+          value: "5000"
         - name: SAVE_TOTAL_LIMIT
           value: "2"
 
@@ -156,6 +156,29 @@ spec:
         - effect: PreferNoSchedule
           key: nvidia.com/gpu
           operator: Exists
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+        # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
+        # Tolerate nautilus.io/gitlab-issue taints
+        - key: nautilus.io/gitlab-issue
+          operator: Exists
+          effect: NoSchedule
+        # Tolerate nautilus.io/system taints (system nodes that can run workloads)
+        - key: nautilus.io/system
+          operator: Exists
+          effect: NoSchedule
+        # Tolerate storage-related taints if needed
+        - key: nautilus.io/storage-no-run
+          operator: Exists
+          effect: NoSchedule
+        # Tolerate testing nodes
+        - key: nautilus.io/testing
+          operator: Exists
+          effect: NoSchedule
 
       affinity:
         nodeAffinity:
@@ -177,4 +200,4 @@ spec:
       - name: dev-shm
         emptyDir:
           medium: Memory
-          sizeLimit: 64Gi
+          sizeLimit: 32Gi
