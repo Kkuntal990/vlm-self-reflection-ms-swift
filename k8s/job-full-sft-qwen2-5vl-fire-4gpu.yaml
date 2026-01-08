@@ -100,17 +100,20 @@ spec:
           value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
 
         # Sequence configuration
+        # MAX_LEN=3584 fits all FIRE samples (~2600 tokens avg) without packing
+        # This prevents OOM by reducing cross-entropy logits memory from 9.8GB to 4.4GB
         - name: MAX_LEN
-          value: "8192"
+          value: "3584"
         - name: IMAGE_MAX_TOKEN_NUM
           value: "2048"
 
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "4"           # Per-GPU batch size (adjust based on memory)
+          value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
           value: "8"           # Gradient accumulation steps
+        # Effective batch size: 4 × 8 × 4 GPUs = 128
         - name: EPOCHS
           value: "100"           # Number of training epochs
         - name: LR

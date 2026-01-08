@@ -27,7 +27,7 @@ VAL_DATASET_PATH="${VAL_DATASET_PATH:-/outputs/fire_bc/fire_sharegpt_test.jsonl}
 # ============================================
 # Sequence and Vision Configuration
 # ============================================
-MAX_LEN="${MAX_LEN:-8192}"
+MAX_LEN="${MAX_LEN:-3584}"  # Optimized for FIRE dataset (samples ~2600 tokens)
 IMAGE_MAX_TOKEN_NUM="${IMAGE_MAX_TOKEN_NUM:-2048}"
 export IMAGE_MAX_TOKEN_NUM
 
@@ -37,8 +37,8 @@ export PYTORCH_CUDA_ALLOC_CONF='expandable_segments:True'
 # ============================================
 # Training Hyperparameters
 # ============================================
-# Batch size per GPU (adjust based on memory)
-BATCH="${BATCH:-1}"
+# Batch size per GPU (with MAX_LEN=3584, we can fit batch=4)
+BATCH="${BATCH:-4}"
 # Gradient accumulation to maintain effective batch size
 GRAD_ACC="${GRAD_ACC:-8}"
 EPOCHS="${EPOCHS:-3}"
@@ -166,8 +166,7 @@ swift sft \
     --report_to tensorboard \
     --save_only_model true \
     --deepspeed zero2 \
-    --group_by_length true \
-    --packing true \
+    --packing false \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \
