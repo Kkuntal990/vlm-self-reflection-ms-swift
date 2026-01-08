@@ -17,11 +17,11 @@ spec:
 
     resources:
       requests:
-        nvidia.com/a100: "0"
+        nvidia.com/a100: "2"
         memory: "32Gi"
         cpu: "4"
       limits:
-        nvidia.com/a100: "0"
+        nvidia.com/a100: "2"
         memory: "32Gi"
         cpu: "4"
 
@@ -71,7 +71,7 @@ spec:
 
     # Training hyperparameters (configurable)
     - name: BATCH
-      value: "4"           # Per-GPU batch size (adjust based on memory)
+      value: "2"           # Per-GPU batch size (adjust based on memory)
     - name: GRAD_ACC
       value: "8"           # Gradient accumulation steps
     - name: EPOCHS
@@ -89,19 +89,19 @@ spec:
 
     # DDP configuration
     - name: NPROC
-      value: "0"           # Number of GPUs
+      value: "2"           # Number of GPUs
 
     # Output configuration
     - name: RUN_NAME
-      value: "qwen2_5vl-7b-fire-full-sft-4gpu"
+      value: "qwen2_5vl-7b-fire-full-sft-2gpu"
 
     # Logging configuration
     - name: LOGGING_STEPS
       value: "10"
     - name: EVAL_STEPS
-      value: "20"
+      value: "2000"
     - name: SAVE_STEPS
-      value: "25"
+      value: "2500"
     - name: SAVE_TOTAL_LIMIT
       value: "2"
 

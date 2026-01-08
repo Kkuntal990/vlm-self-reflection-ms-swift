@@ -162,16 +162,17 @@ swift sft \
     --freeze_vit true \
     --freeze_aligner true \
     --dataloader_num_workers 4 \
-    --dataset_num_proc 4 \
+    --dataset_num_proc 8 \
     --report_to tensorboard \
     --save_only_model true \
     --deepspeed zero2 \
     --group_by_length true \
     --packing true \
-    --packing_length 4096 \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
-    --attn_impl flash_attn
+    --attn_impl flash_attn \
+    --load_from_cache_file true
+
 
 echo ""
 echo "========================================="
