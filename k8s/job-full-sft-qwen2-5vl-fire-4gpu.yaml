@@ -108,7 +108,7 @@ spec:
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "8"           # Per-GPU batch size (adjust based on memory)
+          value: "4"           # Per-GPU batch size (adjust based on memory)
         - name: GRAD_ACC
           value: "8"           # Gradient accumulation steps
         - name: EPOCHS
@@ -128,13 +128,18 @@ spec:
         - name: NPROC
           value: "4"           # Number of GPUs
 
+        - name: NCCL_DEBUG
+          value: "INFO"
+        - name: NCCL_TIMEOUT
+          value: "1800"        # 30 min timeout instead of hang
+
         # Output configuration
         - name: RUN_NAME
           value: "qwen2_5vl-7b-fire-full-sft-4gpu"
 
         # Logging configuration
         - name: LOGGING_STEPS
-          value: "50"
+          value: "10"
         - name: EVAL_STEPS
           value: "2500"
         - name: SAVE_STEPS
@@ -159,10 +164,10 @@ spec:
         - key: nautilus.io/reservation
           operator: Exists
           effect: NoSchedule
-        # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
-        - key: nautilus.io/issue
-          operator: Exists
-          effect: NoSchedule
+        # # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
+        # - key: nautilus.io/issue
+        #   operator: Exists
+        #   effect: NoSchedule
 
       affinity:
         nodeAffinity:
