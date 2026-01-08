@@ -108,7 +108,7 @@ spec:
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "4"           # Per-GPU batch size (adjust based on memory)
+          value: "6"           # Per-GPU batch size (adjust based on memory)
         - name: GRAD_ACC
           value: "8"           # Gradient accumulation steps
         - name: EPOCHS
