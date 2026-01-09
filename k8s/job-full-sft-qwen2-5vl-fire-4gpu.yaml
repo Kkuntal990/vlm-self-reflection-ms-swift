@@ -55,12 +55,12 @@ spec:
         resources:
           requests:
             nvidia.com/a100: "4"
-            memory: "64Gi"
-            cpu: "8"
+            memory: "128Gi"
+            cpu: "16"
           limits:
             nvidia.com/a100: "4"
-            memory: "64Gi"
-            cpu: "8"
+            memory: "128Gi"
+            cpu: "16"
 
         volumeMounts:
         - name: cache-volume
@@ -164,9 +164,9 @@ spec:
         - effect: PreferNoSchedule
           key: nvidia.com/gpu
           operator: Exists
-        # - key: nautilus.io/reservation
-        #   operator: Exists
-        #   effect: NoSchedule
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
         # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
         - key: nautilus.io/issue
           operator: Exists
@@ -192,4 +192,4 @@ spec:
       - name: dev-shm
         emptyDir:
           medium: Memory
-          sizeLimit: 24Gi
+          sizeLimit: 32Gi
