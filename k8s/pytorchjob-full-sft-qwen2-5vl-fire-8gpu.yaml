@@ -18,7 +18,7 @@ spec:
             sidecar.istio.io/inject: "false"
         spec:
           containers:
-          - name: ms-swift-trainer
+          - name: pytorch
             image: ghcr.io/kkuntal990/ms-swift-qwen:latest
             imagePullPolicy: Always
             command: ["/bin/bash"]
@@ -127,7 +127,7 @@ spec:
 
             # Training hyperparameters
             - name: BATCH
-              value: "4"
+              value: "8"
             - name: GRAD_ACC
               value: "8"
             # Effective batch size: 4 × 8 × 8 GPUs = 256
@@ -150,7 +150,7 @@ spec:
 
             # Logging configuration
             - name: LOGGING_STEPS
-              value: "10"
+              value: "2"
             - name: EVAL_STEPS
               value: "2500"
             - name: SAVE_STEPS
@@ -158,19 +158,31 @@ spec:
             - name: SAVE_TOTAL_LIMIT
               value: "2"
 
-            # NCCL configuration for multi-node
+            # NCCL configuration for multi-node (optimized)
             - name: NCCL_DEBUG
-              value: "INFO"
+              value: "WARN"
             - name: NCCL_TIMEOUT
               value: "1800"
-            - name: NCCL_SOCKET_IFNAME
-              value: "eth0"
+            - name: NCCL_IB_DISABLE
+              value: "0"
+            - name: NCCL_P2P_DISABLE
+              value: "0"
+            - name: NCCL_SOCKET_NTHREADS
+              value: "4"
+            - name: NCCL_NSOCKS_PERTHREAD
+              value: "4"
+            - name: NCCL_BUFFSIZE
+              value: "8388608"
+            - name: NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
 
             # Python and CUDA settings
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: PYTORCH_CUDA_ALLOC_CONF
               value: "expandable_segments:True"
+            - name: TORCH_DISTRIBUTED_DEBUG
+              value: "OFF"
 
           tolerations:
             - effect: NoSchedule
@@ -223,7 +235,7 @@ spec:
             sidecar.istio.io/inject: "false"
         spec:
           containers:
-          - name: ms-swift-trainer
+          - name: pytorch
             image: ghcr.io/kkuntal990/ms-swift-qwen:latest
             imagePullPolicy: Always
             command: ["/bin/bash"]
@@ -332,7 +344,7 @@ spec:
 
             # Training hyperparameters
             - name: BATCH
-              value: "4"
+              value: "8"
             - name: GRAD_ACC
               value: "8"
             # Effective batch size: 4 × 8 × 8 GPUs = 256
@@ -355,7 +367,7 @@ spec:
 
             # Logging configuration
             - name: LOGGING_STEPS
-              value: "10"
+              value: "2"
             - name: EVAL_STEPS
               value: "2500"
             - name: SAVE_STEPS
@@ -363,19 +375,31 @@ spec:
             - name: SAVE_TOTAL_LIMIT
               value: "2"
 
-            # NCCL configuration for multi-node
+            # NCCL configuration for multi-node (optimized)
             - name: NCCL_DEBUG
-              value: "INFO"
+              value: "WARN"
             - name: NCCL_TIMEOUT
               value: "1800"
-            - name: NCCL_SOCKET_IFNAME
-              value: "eth0"
+            - name: NCCL_IB_DISABLE
+              value: "0"
+            - name: NCCL_P2P_DISABLE
+              value: "0"
+            - name: NCCL_SOCKET_NTHREADS
+              value: "4"
+            - name: NCCL_NSOCKS_PERTHREAD
+              value: "4"
+            - name: NCCL_BUFFSIZE
+              value: "8388608"
+            - name: NCCL_ASYNC_ERROR_HANDLING
+              value: "1"
 
             # Python and CUDA settings
             - name: PYTHONUNBUFFERED
               value: "1"
             - name: PYTORCH_CUDA_ALLOC_CONF
               value: "expandable_segments:True"
+            - name: TORCH_DISTRIBUTED_DEBUG
+              value: "OFF"
 
           tolerations:
             - effect: NoSchedule
