@@ -168,9 +168,9 @@ spec:
         #   operator: Exists
         #   effect: NoSchedule
         # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
-        # - key: nautilus.io/issue
-        #   operator: Exists
-        #   effect: NoSchedule
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
 
       affinity:
         nodeAffinity:
