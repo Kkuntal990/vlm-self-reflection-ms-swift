@@ -103,7 +103,7 @@ spec:
         # MAX_LEN=3584 fits all FIRE samples (~2600 tokens avg) without packing
         # This prevents OOM by reducing cross-entropy logits memory from 9.8GB to 4.4GB
         - name: MAX_LEN
-          value: "3584"
+          value: "3048"
         - name: IMAGE_MAX_TOKEN_NUM
           value: "2048"
 
@@ -132,7 +132,7 @@ spec:
           value: "4"           # Number of GPUs
 
         - name: NCCL_DEBUG
-          value: "INFO"
+          value: "WARN"
         - name: NCCL_TIMEOUT
           value: "1800"        # 30 min timeout instead of hang
 
@@ -142,7 +142,7 @@ spec:
 
         # Logging configuration
         - name: LOGGING_STEPS
-          value: "10"
+          value: "5"
         - name: EVAL_STEPS
           value: "2500"
         - name: SAVE_STEPS

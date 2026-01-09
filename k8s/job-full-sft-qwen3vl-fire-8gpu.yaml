@@ -108,7 +108,7 @@ spec:
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "4"           # Per-GPU batch size (adjust based on memory)
+          value: "8"           # Per-GPU batch size (adjust based on memory)
         - name: GRAD_ACC
           value: "8"           # Gradient accumulation steps
         - name: EPOCHS
@@ -134,7 +134,7 @@ spec:
 
         # Logging configuration
         - name: LOGGING_STEPS
-          value: "50"
+          value: "5"
         - name: EVAL_STEPS
           value: "2500"
         - name: SAVE_STEPS
@@ -161,22 +161,6 @@ spec:
           effect: NoSchedule
         # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
         - key: nautilus.io/issue
-          operator: Exists
-          effect: NoSchedule
-        # Tolerate nautilus.io/gitlab-issue taints
-        - key: nautilus.io/gitlab-issue
-          operator: Exists
-          effect: NoSchedule
-        # Tolerate nautilus.io/system taints (system nodes that can run workloads)
-        - key: nautilus.io/system
-          operator: Exists
-          effect: NoSchedule
-        # Tolerate storage-related taints if needed
-        - key: nautilus.io/storage-no-run
-          operator: Exists
-          effect: NoSchedule
-        # Tolerate testing nodes
-        - key: nautilus.io/testing
           operator: Exists
           effect: NoSchedule
 
