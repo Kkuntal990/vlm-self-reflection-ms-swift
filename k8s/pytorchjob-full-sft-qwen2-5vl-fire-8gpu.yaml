@@ -199,16 +199,6 @@ spec:
               operator: Exists
               effect: NoSchedule
 
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                - matchExpressions:
-                  - key: nvidia.com/gpu.product
-                    operator: In
-                    values:
-                    - NVIDIA-A100-SXM4-80GB
-
           volumes:
           - name: cache-volume
             emptyDir:
@@ -222,7 +212,7 @@ spec:
               sizeLimit: 32Gi
 
     Worker:
-      replicas: 1
+      replicas: 2
       restartPolicy: OnFailure
       template:
         metadata:
@@ -283,13 +273,13 @@ spec:
 
             resources:
               requests:
-                nvidia.com/a100: "4"
-                memory: "128Gi"
-                cpu: "16"
+                nvidia.com/a100: "2"
+                memory: "64Gi"
+                cpu: "8"
               limits:
-                nvidia.com/a100: "4"
-                memory: "128Gi"
-                cpu: "16"
+                nvidia.com/a100: "2"
+                memory: "64Gi"
+                cpu: "8"
 
             volumeMounts:
             - name: cache-volume
@@ -415,16 +405,6 @@ spec:
             - key: nautilus.io/issue
               operator: Exists
               effect: NoSchedule
-
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                - matchExpressions:
-                  - key: nvidia.com/gpu.product
-                    operator: In
-                    values:
-                    - NVIDIA-A100-SXM4-80GB
 
           volumes:
           - name: cache-volume
