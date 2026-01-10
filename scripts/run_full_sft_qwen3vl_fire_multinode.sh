@@ -190,11 +190,11 @@ swift sft \
     --save_steps "${SAVE_STEPS}" \
     --save_total_limit "${SAVE_TOTAL_LIMIT}" \
     --use_hf true \
-    --gradient_checkpointing true \
+    --gradient_checkpointing false \
     --freeze_vit true \
     --freeze_aligner true \
     --dataloader_num_workers 8 \
-    --dataset_num_proc 16 \
+    --dataset_num_proc 8 \
     --report_to tensorboard \
     --save_only_model true \
     --deepspeed zero2 \
