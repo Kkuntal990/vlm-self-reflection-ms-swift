@@ -158,7 +158,7 @@ swift sft \
     --save_steps "${SAVE_STEPS}" \
     --save_total_limit "${SAVE_TOTAL_LIMIT}" \
     --use_hf true \
-    --gradient_checkpointing false \
+    --gradient_checkpointing true \
     --freeze_vit true \
     --freeze_aligner true \
     --dataloader_num_workers 8 \

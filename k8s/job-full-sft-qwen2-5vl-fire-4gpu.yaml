@@ -110,11 +110,11 @@ spec:
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "2"           # Per-GPU batch size (safe with MAX_LEN=3584)
+          value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
-          value: "16"           # Gradient accumulation steps
+          value: "8"           # Gradient accumulation steps
         - name: EPOCHS
-          value: "100"           # Number of training epochs
+          value: "2"           # Number of training epochs
         - name: LR
           value: "5e-6"        # Learning rate (lower for full fine-tuning)
         - name: WARMUP_RATIO
@@ -143,9 +143,9 @@ spec:
         - name: LOGGING_STEPS
           value: "5"
         - name: EVAL_STEPS
-          value: "2500"
+          value: "50"
         - name: SAVE_STEPS
-          value: "5000"
+          value: "100"
         - name: SAVE_TOTAL_LIMIT
           value: "2"
 
