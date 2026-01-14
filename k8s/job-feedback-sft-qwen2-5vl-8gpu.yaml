@@ -64,7 +64,7 @@ spec:
           # Start training
           echo "Starting feedback SFT training..."
           echo ""
-          /workspace/scripts/run_feedback_sft_qwen3vl.sh
+          /workspace/scripts/run_feedback_sft_qwen2_5vl.sh
 
         resources:
           requests:
