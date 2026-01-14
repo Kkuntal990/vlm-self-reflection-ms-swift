@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: qwen2-5vl-7b-fire-full-sft-4gpu-job-default-loss
+  name: qwen2-5vl-7b-fire-feedback-sft-8gpu-job
 spec:
   backoffLimit: 3
   template:
     metadata:
       labels:
         app: ms-swift
-        task: fire-full-sft
+        task: fire-feedback-sft
         model: qwen2-5-vl-7b
         gpu: a100
     spec:
@@ -23,8 +23,8 @@ spec:
         - "-c"
         - |
           echo "========================================="
-          echo "FIRE Full Fine-Tuning (4 GPUs)"
-          echo "Full Parameter Update for Qwen2.5-VL-7B"
+          echo "FIRE Feedback SFT (8 GPUs)"
+          echo "Training to Generate FEEDBACK"
           echo "========================================="
           echo ""
 
@@ -33,7 +33,8 @@ spec:
             echo "ERROR: Training dataset not found!"
             echo "Expected: ${DATASET_PATH}"
             echo ""
-            echo "Please ensure the dataset file exists."
+            echo "Please run preprocessing first:"
+            echo "  kubectl apply -f k8s/job-preprocess-fire-feedback-cpu.yaml"
             exit 1
           fi
 
@@ -42,24 +43,37 @@ spec:
           wc -l "${DATASET_PATH}"
           echo ""
 
+          # Show first example structure
+          echo "First example structure:"
+          head -1 "${DATASET_PATH}" | python -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          print(f'Messages count: {len(data[\"messages\"])}')
+          for i, msg in enumerate(data['messages']):
+              role = msg['role']
+              loss = msg.get('loss', 'N/A')
+              print(f'  [{i}] {role}: loss={loss}')
+          "
+          echo ""
+
           # GPU verification
           echo "GPU Status:"
           nvidia-smi
           echo ""
 
           # Start training
-          echo "Starting full fine-tuning..."
+          echo "Starting feedback SFT training..."
           echo ""
-          /workspace/scripts/run_full_sft_qwen3vl_fire_8gpu.sh
+          /workspace/scripts/run_feedback_sft_qwen3vl.sh
 
         resources:
           requests:
-            nvidia.com/a100: "4"
-            memory: "128Gi"
+            nvidia.com/a100: "8"
+            memory: "64Gi"
             cpu: "16"
           limits:
-            nvidia.com/a100: "4"
-            memory: "128Gi"
+            nvidia.com/a100: "8"
+            memory: "64Gi"
             cpu: "16"
 
         volumeMounts:
@@ -97,24 +111,22 @@ spec:
         - name: MODEL_ID
           value: "Qwen/Qwen2.5-VL-7B-Instruct"
         - name: DATASET_PATH
-          value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
+          value: "/outputs/fire_feedback/fire_feedback_train.jsonl"
 
         # Sequence configuration
-        # MAX_LEN=3584 fits all FIRE samples (~2600 tokens avg) without packing
-        # This prevents OOM by reducing cross-entropy logits memory from 9.8GB to 4.4GB
         - name: MAX_LEN
-          value: "3048"
+          value: "8192"
         - name: IMAGE_MAX_TOKEN_NUM
           value: "2048"
 
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
+          value: "8"           # Per-GPU batch size (adjust based on memory)
         - name: GRAD_ACC
           value: "8"           # Gradient accumulation steps
         - name: EPOCHS
-          value: "2"           # Number of training epochs
+          value: "100"         # Number of training epochs
         - name: LR
           value: "5e-6"        # Learning rate (lower for full fine-tuning)
         - name: WARMUP_RATIO
@@ -123,29 +135,26 @@ spec:
           value: "0.01"        # Weight decay
         - name: MAX_GRAD_NORM
           value: "1.0"         # Gradient clipping
+
+        # Loss configuration - 'default' respects per-message loss field
         - name: LOSS_SCALE
           value: "default"
 
         # DDP configuration
         - name: NPROC
-          value: "4"           # Number of GPUs
-
-        - name: NCCL_DEBUG
-          value: "WARN"
-        - name: NCCL_TIMEOUT
-          value: "1800"        # 30 min timeout instead of hang
+          value: "8"           # Number of GPUs
 
         # Output configuration
         - name: RUN_NAME
-          value: "qwen2_5vl-7b-fire-full-sft-4gpu-loss-scale-default"
+          value: "qwen2_5vl-7b-fire-feedback-sft-8gpu"
 
         # Logging configuration
         - name: LOGGING_STEPS
           value: "5"
         - name: EVAL_STEPS
-          value: "50"
+          value: "2500"
         - name: SAVE_STEPS
-          value: "100"
+          value: "5000"
         - name: SAVE_TOTAL_LIMIT
           value: "2"
 
