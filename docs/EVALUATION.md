@@ -2,6 +2,28 @@
 
 This guide explains how to evaluate your fine-tuned VLM's self-refinement capability using reward model scoring.
 
+---
+
+## TL;DR - What We Have
+
+| Component | Description |
+|-----------|-------------|
+| **Reward Model** | [Skywork-VL-Reward-7B](https://huggingface.co/Skywork/Skywork-VL-Reward-7B) - Multimodal reward model based on Qwen2.5-VL |
+| **Evaluation Type** | Per-turn reward scoring of multi-turn self-refinement dialogues |
+| **Modes** | `ground_truth` (score FIRE dataset) or `generated` (generate + score with your model) |
+| **Key Metric** | **Reward Delta** - Does the reward score increase across refinement turns? |
+| **Scripts** | `score_with_reward_model.py`, `generate_refinements.py`, `evaluate_self_refinement.py`, `analyze_refinement_metrics.py` |
+| **K8s Resources** | `jupyter-1gpu-test.yaml` (interactive testing), `job-evaluate-self-refinement.yaml` (batch evaluation) |
+
+**Quick Test Command:**
+```bash
+python /workspace/scripts/evaluate_self_refinement.py \
+    --dataset_path /outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl \
+    --mode ground_truth --max_samples 5 --output_dir /outputs/test_eval
+```
+
+---
+
 ## Overview
 
 The evaluation pipeline measures whether model responses **improve across multiple refinement turns**. It uses [Skywork-VL-Reward-7B](https://huggingface.co/Skywork/Skywork-VL-Reward-7B) to score each response and tracks improvement metrics.
