@@ -187,9 +187,10 @@ kubectl apply --dry-run=server -f k8s/job-*.yaml
 ## Resources
 
 - [README.md](README.md) - Comprehensive documentation
-- [QUICKSTART.md](QUICKSTART.md) - Quick deployment guide
-- [DOCKER_BUILD.md](DOCKER_BUILD.md) - Docker build system
-- [GHCR_SETUP.md](GHCR_SETUP.md) - GitHub Container Registry setup
+- [docs/DATASETS.md](docs/DATASETS.md) - Dataset statistics and preprocessing
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Quick deployment guide
+- [docs/DOCKER_BUILD.md](docs/DOCKER_BUILD.md) - Docker build system
+- [docs/GHCR_SETUP.md](docs/GHCR_SETUP.md) - GitHub Container Registry setup
 - [ms-swift](https://github.com/modelscope/swift) - Framework reference
 - [FIRE dataset](https://huggingface.co/datasets/PengxiangLi/FIRE) - Behavior cloning data
 
