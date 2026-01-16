@@ -26,3 +26,18 @@ protobuf
 jupyter
 jupyterlab
 ipywidgets
+
+# ============================================
+# Evaluation dependencies (reward model scoring)
+# ============================================
+
+# TRL - Transformers Reinforcement Learning (for value head in reward models)
+trl>=0.8.0
+
+# Safetensors for loading reward model weights
+safetensors>=0.4.0
+
+# Visualization for evaluation analysis
+matplotlib>=3.7.0
+seaborn>=0.12.0
+pandas>=2.0.0

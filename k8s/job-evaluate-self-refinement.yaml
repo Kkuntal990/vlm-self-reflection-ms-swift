@@ -38,9 +38,9 @@ spec:
           echo "Max Samples: ${MAX_SAMPLES} (0 = all)"
           echo ""
 
-          # Install additional dependencies for reward model
-          echo "Installing evaluation dependencies..."
-          pip install --quiet trl safetensors qwen-vl-utils matplotlib seaborn
+          # Note: trl, safetensors, matplotlib, seaborn are now in requirements.txt
+          # If using an older image, uncomment the line below:
+          # pip install --quiet trl safetensors matplotlib seaborn
 
           # Verify GPU availability
           echo ""
