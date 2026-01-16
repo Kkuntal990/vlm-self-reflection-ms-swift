@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temp-cpu
+spec:
+  restartPolicy: Never
+  containers:
+  - name: shell
+    image: busybox:latest
+    command: ["sleep", "infinity"]
+
+    resources:
+      limits:
+        memory: "2Gi"
+        cpu: "1"
+      requests:
+        memory: "2Gi"
+        cpu: "1"
+
+    volumeMounts:
+      - name: cache-volume
+        mountPath: /cache
+      - name: outputs-volume
+        mountPath: /outputs
+
+  volumes:
+    - name: cache-volume
+      persistentVolumeClaim:
+        claimName: ms-swift-cache-pvc
+    - name: outputs-volume
+      persistentVolumeClaim:
+        claimName: ms-swift-outputs-pvc

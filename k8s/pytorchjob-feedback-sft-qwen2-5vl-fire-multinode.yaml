@@ -73,6 +73,7 @@ spec:
               echo "  NNODES: ${NNODES}"
               echo "  NODE_RANK: ${NODE_RANK}"
               echo "  NPROC_PER_NODE: ${NPROC_PER_NODE}"
+              echo "  WORLD_SIZE: $((NNODES * NPROC_PER_NODE))"
               echo ""
 
               # Start training
@@ -82,13 +83,13 @@ spec:
 
             resources:
               requests:
-                nvidia.com/a100: "4"
-                memory: "128Gi"
-                cpu: "16"
+                nvidia.com/a100: "2"
+                memory: "64Gi"
+                cpu: "8"
               limits:
-                nvidia.com/a100: "4"
-                memory: "128Gi"
-                cpu: "16"
+                nvidia.com/a100: "2"
+                memory: "64Gi"
+                cpu: "8"
 
             volumeMounts:
             - name: cache-volume
@@ -134,10 +135,11 @@ spec:
               value: "2048"
 
             # Multi-node configuration
+            # 4 nodes × 2 GPUs each = 8 total GPUs (uniform configuration)
             - name: NNODES
-              value: "2"
-            - name: NPROC_PER_NODE
               value: "4"
+            - name: NPROC_PER_NODE
+              value: "2"
             - name: NODE_RANK
               value: "0"
 
@@ -217,6 +219,15 @@ spec:
               operator: Exists
               effect: NoSchedule
 
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                    - NVIDIA-A100-SXM4-80GB
           volumes:
           - name: cache-volume
             emptyDir:
@@ -230,7 +241,7 @@ spec:
               sizeLimit: 32Gi
 
     Worker:
-      replicas: 1
+      replicas: 3
       restartPolicy: OnFailure
       template:
         metadata:
@@ -282,6 +293,7 @@ spec:
               echo "  NNODES: ${NNODES}"
               echo "  NODE_RANK: ${NODE_RANK}"
               echo "  NPROC_PER_NODE: ${NPROC_PER_NODE}"
+              echo "  WORLD_SIZE: $((NNODES * NPROC_PER_NODE))"
               echo ""
 
               # Start training
@@ -291,13 +303,13 @@ spec:
 
             resources:
               requests:
-                nvidia.com/a100: "4"
-                memory: "128Gi"
-                cpu: "16"
+                nvidia.com/a100: "2"
+                memory: "64Gi"
+                cpu: "8"
               limits:
-                nvidia.com/a100: "4"
-                memory: "128Gi"
-                cpu: "16"
+                nvidia.com/a100: "2"
+                memory: "64Gi"
+                cpu: "8"
 
             volumeMounts:
             - name: cache-volume
@@ -343,12 +355,12 @@ spec:
               value: "2048"
 
             # Multi-node configuration
+            # 4 nodes × 2 GPUs each = 8 total GPUs (uniform configuration)
             - name: NNODES
-              value: "2"
-            - name: NPROC_PER_NODE
               value: "4"
-            - name: NODE_RANK
-              value: "1"
+            - name: NPROC_PER_NODE
+              value: "2"
+            # NODE_RANK is set automatically by PyTorchJob controller
 
             # Training hyperparameters
             - name: BATCH
@@ -425,6 +437,16 @@ spec:
             - key: nautilus.io/issue
               operator: Exists
               effect: NoSchedule
+
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values:
+                    - NVIDIA-A100-SXM4-80GB
 
           volumes:
           - name: cache-volume

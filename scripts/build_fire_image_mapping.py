@@ -34,8 +34,8 @@ DATASET_SPLIT_MAPPING = {
     # TextVQA
     ("textvqa", "train_val_images"): {"hf_id": "lmms-lab/textvqa", "split": "train", "id_field": "image_id"},
 
-    # DocVQA
-    ("docvqa", "documents"): {"hf_id": "lmms-lab/DocVQA", "config": "DocVQA", "split": "validation", "id_field": "ucsf_document_id"},
+    # DocVQA - ID is composite: {ucsf_document_id}_{ucsf_document_page_no}
+    ("docvqa", "documents"): {"hf_id": "lmms-lab/DocVQA", "config": "DocVQA", "split": "validation", "id_field": "composite_docvqa"},
 
     # ALLaVA
     ("allava_vflan", "images"): {"hf_id": "FreedomIntelligence/ALLaVA-4V", "config": "allava_vflan", "split": "caption", "id_field": None},
@@ -65,8 +65,8 @@ DATASET_SPLIT_MAPPING = {
     ("synthdog-en", "images"): {"hf_id": "naver-clova-ix/synthdog-en", "split": "train", "id_field": None},
     ("synthdog-en", "test-images"): {"hf_id": "naver-clova-ix/synthdog-en", "split": "validation", "id_field": None},
 
-    # DVQA - DISABLED: Dataset doesn't exist on Hub
-    # ("dvqa", "images"): {"hf_id": "lmms-lab/DVQA", "split": "train", "id_field": "image"},
+    # DVQA - Using DavidNguyen/DVQA (webdataset format with __key__ field)
+    ("dvqa", "images"): {"hf_id": "DavidNguyen/DVQA", "split": "train", "id_field": "__key__"},
 
     # AI2D
     ("ai2d", "images"): {"hf_id": "lmms-lab/ai2d", "split": "test", "id_field": "image"},
@@ -76,14 +76,14 @@ DATASET_SPLIT_MAPPING = {
     ("mathverse", "images_version_5"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
     ("mathverse", "images_version_6"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
 
-    # SEED-Bench - Re-enabled (should work now, was temporary 502 error)
-    ("seedbench", "SEED-Bench-image"): {"hf_id": "lmms-lab/SEED-Bench", "split": "test", "id_field": "question_id"},
+    # SEED-Bench - Using data_id field which matches FIRE paths (341486_825594355.jpg)
+    ("seedbench", "SEED-Bench-image"): {"hf_id": "lmms-lab/SEED-Bench", "split": "test", "id_field": "data_id"},
 
     # SAM (Segment Anything) - DISABLED: Dataset doesn't exist on Hub
     # ("sam", "images"): {"hf_id": "facebook/segment-anything-1b", "split": "train", "id_field": None},
 
-    # MMMU - DISABLED: Requires config parameter (30 different configs available)
-    # ("mmmu", "test-images"): {"hf_id": "MMMU/MMMU", "split": "test", "id_field": "id"},
+    # MMMU - Multi-config dataset (30 subjects), use "all_configs" marker for special handling
+    ("mmmu", "test-images"): {"hf_id": "MMMU/MMMU", "split": "validation", "id_field": "id", "all_configs": True},
 
     # MME (multiple categories)
     ("mme", "landmark"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
@@ -107,11 +107,11 @@ DATASET_SPLIT_MAPPING = {
     # ShareGPT4V TextVQA
     ("share_textvqa", "images"): {"hf_id": "lmms-lab/textvqa", "split": "train", "id_field": "image_id"},
 
-    # LLaVA in the Wild - Re-enabled (dataset is available on HuggingFace)
-    ("llava-in-the-wild", "images"): {"hf_id": "liuhaotian/LLaVA-Instruct-150K", "split": "train", "id_field": "id"},
+    # LLaVA in the Wild - Using lmms-lab/llava-bench-in-the-wild
+    ("llava-in-the-wild", "images"): {"hf_id": "lmms-lab/llava-bench-in-the-wild", "split": "train", "id_field": "image_id"},
 
-    # MM-Vet - DISABLED: Dataset doesn't exist on Hub
-    # ("mm-vet", "images"): {"hf_id": "lmms-lab/MM-Vet", "split": "test", "id_field": None},
+    # MM-Vet - Using lmms-lab/MMVet
+    ("mm-vet", "images"): {"hf_id": "lmms-lab/MMVet", "split": "test", "id_field": "question_id"},
 }
 
 
@@ -136,6 +136,88 @@ def collect_fire_paths(fire_dataset_id: str, splits: list, max_samples: int = 0)
     return fire_paths
 
 
+def build_mapping_for_multiconfig_source(fire_paths: set, source: str, subfolder: str, config: dict, cache_dir: Path, relevant_paths: set):
+    """
+    Build mapping for datasets with multiple configs (like MMMU with 30 subject configs).
+
+    FIRE paths look like: mmmu/test-images/validation_Geography_20.jpg
+    Where 'Geography' is the config name and '20' is the sample id.
+
+    Returns:
+        dict: {fire_path: mapping_entry}
+    """
+    from datasets import get_dataset_config_names
+
+    hf_id = config["hf_id"]
+    split = config["split"]
+    id_field = config.get("id_field")
+
+    logger.info(f"Loading multi-config dataset: {hf_id}")
+
+    # Get all available configs
+    try:
+        all_config_names = get_dataset_config_names(hf_id)
+        logger.info(f"Found {len(all_config_names)} configs: {all_config_names[:5]}...")
+    except Exception as e:
+        logger.error(f"Failed to get configs for {hf_id}: {e}")
+        return {}
+
+    # Build a mapping of config -> id -> index for all configs
+    # First, parse FIRE paths to understand which configs we need
+    config_to_paths = defaultdict(set)
+    for fire_path in relevant_paths:
+        # Parse: mmmu/test-images/validation_Geography_20.jpg -> config=Geography, id=validation_Geography_20
+        filename = fire_path.split('/')[-1]
+        img_id = filename.rsplit('.', 1)[0]  # validation_Geography_20
+
+        # Extract config name from the id (format: validation_ConfigName_Number)
+        parts = img_id.split('_')
+        if len(parts) >= 3:
+            # Config name might have underscores, so we need to find the last number
+            # validation_Diagnostics_and_Laboratory_Medicine_1 -> config = Diagnostics_and_Laboratory_Medicine
+            config_name = '_'.join(parts[1:-1])  # Everything between 'validation' and the number
+            config_to_paths[config_name].add((fire_path, img_id))
+
+    logger.info(f"Need {len(config_to_paths)} configs from FIRE paths")
+
+    mapping = {}
+
+    # Load each needed config and build the mapping
+    for config_name in tqdm(sorted(config_to_paths.keys()), desc="Loading configs"):
+        if config_name not in all_config_names:
+            logger.warning(f"Config '{config_name}' not found in {hf_id}")
+            continue
+
+        try:
+            ds = load_dataset(hf_id, config_name, split=split, cache_dir=str(cache_dir), trust_remote_code=True)
+        except Exception as e:
+            logger.warning(f"Failed to load config {config_name}: {e}")
+            continue
+
+        # Build id -> index mapping for this config
+        id_to_idx = {}
+        for idx, sample in enumerate(ds):
+            sample_id = sample.get(id_field)
+            if sample_id is not None:
+                id_to_idx[str(sample_id)] = idx
+
+        # Map paths for this config
+        for fire_path, img_id in config_to_paths[config_name]:
+            if img_id in id_to_idx:
+                idx = id_to_idx[img_id]
+                mapping[fire_path] = {
+                    "dataset": hf_id,
+                    "config": config_name,
+                    "split": split,
+                    "index": idx,
+                    "id_field": id_field,
+                    "id_value": img_id
+                }
+
+    logger.info(f"✓ Mapped {len(mapping)}/{len(relevant_paths)} paths for multi-config dataset")
+    return mapping
+
+
 def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, config: dict, cache_dir: Path):
     """
     Build mapping for a specific dataset/split combination.
@@ -151,6 +233,7 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
     split = config["split"]
     id_field = config.get("id_field")
     hf_config = config.get("config")
+    all_configs = config.get("all_configs", False)
 
     # Filter FIRE paths for this source/subfolder
     relevant_paths = {
@@ -163,6 +246,12 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
         return {}
 
     logger.info(f"Need to map {len(relevant_paths)} paths")
+
+    # Handle multi-config datasets (like MMMU with 30 subject configs)
+    if all_configs:
+        return build_mapping_for_multiconfig_source(
+            fire_paths, source, subfolder, config, cache_dir, relevant_paths
+        )
 
     # Load dataset (non-streaming for fast indexed access)
     logger.info(f"Loading dataset: {hf_id} (split: {split})")
@@ -183,10 +272,22 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
     if id_field:
         # Build index for fast lookup
         id_to_idx = {}
-        for idx, sample in enumerate(tqdm(ds, desc="Building index")):
-            sample_id = sample.get(id_field)
-            if sample_id is not None:
-                id_to_idx[str(sample_id)] = idx
+
+        # Handle special composite ID fields
+        if id_field == "composite_docvqa":
+            # DocVQA: ID is {ucsf_document_id}_{ucsf_document_page_no}
+            for idx, sample in enumerate(tqdm(ds, desc="Building index (composite)")):
+                doc_id = sample.get("ucsf_document_id")
+                page_no = sample.get("ucsf_document_page_no")
+                if doc_id is not None and page_no is not None:
+                    composite_id = f"{doc_id}_{page_no}"
+                    id_to_idx[composite_id] = idx
+        else:
+            # Standard single field ID
+            for idx, sample in enumerate(tqdm(ds, desc="Building index")):
+                sample_id = sample.get(id_field)
+                if sample_id is not None:
+                    id_to_idx[str(sample_id)] = idx
 
         logger.info(f"Built index with {len(id_to_idx)} entries")
 
@@ -202,6 +303,11 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
                     img_id = str(int(img_id))
                 except:
                     pass
+
+            # For DVQA, the __key__ field is like "images/bar_val_easy_00017109"
+            # but FIRE path is "dvqa/images/bar_val_easy_00017109.png"
+            if source == "dvqa":
+                img_id = f"images/{img_id}"
 
             # Look up in index
             if img_id in id_to_idx:

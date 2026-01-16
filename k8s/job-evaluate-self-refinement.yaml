@@ -1,0 +1,256 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: self-refinement-evaluation-job
+  labels:
+    app: ms-swift
+    task: self-refinement-evaluation
+    model: qwen2-5-vl-7b
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: self-refinement-evaluation
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: evaluator
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "Self-Refinement Evaluation Pipeline"
+          echo "========================================="
+          echo ""
+          echo "Mode: ${EVAL_MODE}"
+          echo "Reward Model: ${REWARD_MODEL_ID}"
+          echo "Dataset: ${DATASET_PATH}"
+          echo "Model Path: ${MODEL_PATH}"
+          echo "Max Samples: ${MAX_SAMPLES} (0 = all)"
+          echo ""
+
+          # Install additional dependencies for reward model
+          echo "Installing evaluation dependencies..."
+          pip install --quiet trl safetensors qwen-vl-utils matplotlib seaborn
+
+          # Verify GPU availability
+          echo ""
+          echo "GPU Status:"
+          nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+          echo ""
+
+          # Verify dataset exists
+          if [ ! -f "${DATASET_PATH}" ]; then
+            echo "ERROR: Test dataset not found: ${DATASET_PATH}"
+            echo ""
+            echo "Available files in /outputs/fire_preprocessed_v2/:"
+            ls -lh /outputs/fire_preprocessed_v2/ 2>/dev/null || echo "Directory not found"
+            exit 1
+          fi
+
+          echo "Dataset found:"
+          ls -lh "${DATASET_PATH}"
+          echo "Sample count: $(wc -l < "${DATASET_PATH}")"
+          echo ""
+
+          # For generated mode, verify model checkpoint exists
+          if [ "${EVAL_MODE}" = "generated" ]; then
+            if [ ! -d "${MODEL_PATH}" ] && [ ! -f "${MODEL_PATH}/config.json" ]; then
+              echo "WARNING: Model checkpoint not found at ${MODEL_PATH}"
+              echo "Checking if it's a HuggingFace model ID..."
+              # Will be validated by the script
+            else
+              echo "Model checkpoint found:"
+              ls -lh "${MODEL_PATH}/" | head -5
+              echo ""
+            fi
+          fi
+
+          # Create output directory
+          mkdir -p "${OUTPUT_DIR}/evaluation_results"
+
+          # Run evaluation
+          echo "Starting evaluation..."
+          echo ""
+
+          if [ "${EVAL_MODE}" = "ground_truth" ]; then
+            # Ground truth mode: score existing dataset responses
+            python /workspace/scripts/evaluate_self_refinement.py \
+              --dataset_path "${DATASET_PATH}" \
+              --output_dir "${OUTPUT_DIR}/evaluation_results" \
+              --mode ground_truth \
+              --reward_model_id "${REWARD_MODEL_ID}" \
+              --max_samples ${MAX_SAMPLES} \
+              --plateau_threshold ${PLATEAU_THRESHOLD}
+          else
+            # Generated mode: generate responses then score
+            python /workspace/scripts/evaluate_self_refinement.py \
+              --dataset_path "${DATASET_PATH}" \
+              --model_path "${MODEL_PATH}" \
+              --output_dir "${OUTPUT_DIR}/evaluation_results" \
+              --mode generated \
+              --reward_model_id "${REWARD_MODEL_ID}" \
+              --max_samples ${MAX_SAMPLES} \
+              --max_turns ${MAX_TURNS} \
+              --temperature ${TEMPERATURE} \
+              --top_p ${TOP_P} \
+              --max_new_tokens ${MAX_NEW_TOKENS} \
+              --plateau_threshold ${PLATEAU_THRESHOLD}
+          fi
+
+          echo ""
+          echo "========================================="
+          echo "Running Detailed Analysis..."
+          echo "========================================="
+          echo ""
+
+          # Run detailed analysis
+          python /workspace/scripts/analyze_refinement_metrics.py \
+            --results_path "${OUTPUT_DIR}/evaluation_results/sample_results.jsonl" \
+            --output_dir "${OUTPUT_DIR}/evaluation_results/analysis" \
+            --n_extreme 10
+
+          echo ""
+          echo "========================================="
+          echo "Evaluation Complete"
+          echo "========================================="
+          echo ""
+          echo "Results saved to: ${OUTPUT_DIR}/evaluation_results/"
+          ls -lh "${OUTPUT_DIR}/evaluation_results/"
+          echo ""
+          echo "Analysis saved to: ${OUTPUT_DIR}/evaluation_results/analysis/"
+          ls -lh "${OUTPUT_DIR}/evaluation_results/analysis/" 2>/dev/null || echo "Analysis directory not found"
+          echo ""
+
+          # Print summary report
+          if [ -f "${OUTPUT_DIR}/evaluation_results/evaluation_report.txt" ]; then
+            echo "========================================="
+            echo "EVALUATION REPORT"
+            echo "========================================="
+            cat "${OUTPUT_DIR}/evaluation_results/evaluation_report.txt"
+          fi
+
+        env:
+        # HuggingFace token (required for reward model)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Cache directories
+        - name: HF_HOME
+          value: "/cache/hf"
+        - name: TRANSFORMERS_CACHE
+          value: "/cache/hf/transformers"
+        - name: HF_DATASETS_CACHE
+          value: "/cache/hf/datasets"
+        - name: TORCH_HOME
+          value: "/cache/torch"
+        - name: OUTPUT_DIR
+          value: "/outputs"
+
+        # Evaluation configuration
+        - name: EVAL_MODE
+          value: "generated"  # "ground_truth" or "generated"
+
+        # Dataset path (test set)
+        - name: DATASET_PATH
+          value: "/outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl"
+
+        # Fine-tuned model path (required for generated mode)
+        # UPDATE THIS to your checkpoint path
+        - name: MODEL_PATH
+          value: "${MODEL_CHECKPOINT_PATH}"  # e.g., "/outputs/qwen2_5vl-7b-fire-full-sft/checkpoint-final"
+
+        # Reward model
+        - name: REWARD_MODEL_ID
+          value: "Skywork/Skywork-VL-Reward-7B"
+
+        # Evaluation parameters
+        - name: MAX_SAMPLES
+          value: "0"  # 0 = all, use smaller number for testing (e.g., 100)
+        - name: MAX_TURNS
+          value: "3"  # Maximum refinement turns for generated mode
+        - name: PLATEAU_THRESHOLD
+          value: "0.5"  # Minimum improvement to not count as plateau
+
+        # Generation parameters (for generated mode)
+        - name: TEMPERATURE
+          value: "0.7"
+        - name: TOP_P
+          value: "0.9"
+        - name: MAX_NEW_TOKENS
+          value: "512"
+
+        # Python and CUDA settings
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+        resources:
+          requests:
+            nvidia.com/gpu: "2"
+            memory: "96Gi"
+            cpu: "8"
+          limits:
+            nvidia.com/gpu: "2"
+            memory: "128Gi"
+            cpu: "16"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      tolerations:
+        - effect: NoSchedule
+          key: nautilus.io/hardware
+          operator: Equal
+          value: large-gpu
+        - effect: PreferNoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
+
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.product
+                operator: In
+                values:
+                - NVIDIA-A100-SXM4-80GB
+                - NVIDIA-A100-80GB-PCIe
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 32Gi

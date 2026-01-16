@@ -6,7 +6,7 @@
 # instead of student answers. Uses messages format with per-message loss control.
 # Distributed training across multiple nodes.
 #
-# Hardware: 2 nodes × 4 A100 80GB = 8 GPUs total (multi-node DDP)
+# Hardware: 4 nodes × 2 A100 80GB = 8 GPUs total (multi-node DDP, uniform configuration)
 # Model: Qwen/Qwen2.5-VL-7B-Instruct with full parameter updates
 #
 # Environment variables set by PyTorchJob:
@@ -24,8 +24,8 @@ source /workspace/scripts/env.sh
 # Multi-Node Configuration
 # ============================================
 # These can be set by PyTorchJob or overridden via environment
-NNODES="${NNODES:-2}"
-NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
+NNODES="${NNODES:-4}"
+NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
 NODE_RANK="${NODE_RANK:-0}"
 
 # PyTorchJob sets these automatically
