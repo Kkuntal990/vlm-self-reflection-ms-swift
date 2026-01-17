@@ -1,0 +1,171 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-test-mapping-job
+  labels:
+    app: ms-swift
+    task: mapping-builder
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: mapping-builder
+    spec:
+      containers:
+      - name: mapping-builder
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "FIRE Image Mapping Builder"
+          echo "Focus: Test Split Coverage Improvement"
+          echo "========================================="
+          echo ""
+
+          cd /workspace/scripts/data_prep
+
+          # Step 1: Build HuggingFace dataset mapping
+          # Use existing mapping as base, retry datasets with low coverage
+          echo "Step 1: Building HuggingFace dataset mapping..."
+          echo "Using existing mapping: /outputs/fire_image_mapping_complete.json"
+          echo "Will retry datasets with coverage < ${MIN_COVERAGE}"
+          echo ""
+
+          python build_fire_image_mapping.py \
+            --fire_dataset "${FIRE_DATASET}" \
+            --cache_dir /cache \
+            --output_mapping /outputs/fire_image_mapping_v3.json \
+            --existing_mapping /outputs/fire_image_mapping_complete.json \
+            --min_coverage ${MIN_COVERAGE} \
+            --splits ${SPLITS}
+
+          echo ""
+          echo "HuggingFace mapping complete!"
+          echo "New mapping: $(wc -l < /outputs/fire_image_mapping_v3.json) lines"
+          echo ""
+
+          # Step 2: Extract FIRE image paths for local mapping
+          echo "Step 2: Extracting FIRE image paths..."
+          python -c "
+          from datasets import load_dataset
+          print('Loading FIRE dataset...')
+          ds_train = load_dataset('${FIRE_DATASET}', split='train', streaming=True)
+          ds_test = load_dataset('${FIRE_DATASET}', split='test', streaming=True)
+
+          paths = set()
+          for ds, name in [(ds_train, 'train'), (ds_test, 'test')]:
+              print(f'Scanning {name} split...')
+              for sample in ds:
+                  img = sample.get('image', '')
+                  if img:
+                      paths.add(img)
+
+          print(f'Found {len(paths)} unique image paths')
+          with open('/tmp/fire_image_paths.txt', 'w') as f:
+              for p in sorted(paths):
+                  f.write(f'image: {p}\n')
+          print('Saved to /tmp/fire_image_paths.txt')
+          "
+          echo ""
+
+          # Step 3: Build local mapping for GeoQA+ images
+          echo "Step 3: Building local image mapping (GeoQA+)..."
+          python build_local_image_mapping.py \
+            --fire_paths /tmp/fire_image_paths.txt \
+            --output /outputs/local_image_mapping_v3.json
+          echo ""
+
+          # Step 4: Merge mappings
+          echo "Step 4: Merging HuggingFace and local mappings..."
+          python merge_mappings.py \
+            --hf_mapping /outputs/fire_image_mapping_v3.json \
+            --local_mapping /outputs/local_image_mapping_v3.json \
+            --output /outputs/fire_image_mapping_complete_v3.json
+
+          echo ""
+          echo "========================================="
+          echo "Mapping Build Complete"
+          echo "========================================="
+          echo ""
+          echo "Output files:"
+          ls -lh /outputs/fire_image_mapping*.json /outputs/local_image_mapping*.json 2>/dev/null || true
+          echo ""
+          echo "New complete mapping: /outputs/fire_image_mapping_complete_v3.json"
+          echo ""
+
+          # Show mapping statistics
+          python -c "
+          import json
+          from collections import Counter
+
+          with open('/outputs/fire_image_mapping_complete_v3.json') as f:
+              mapping = json.load(f)
+
+          print(f'Total mappings: {len(mapping)}')
+          print()
+
+          prefixes = Counter()
+          for k in mapping.keys():
+              parts = k.split('/')
+              if len(parts) >= 2:
+                  prefixes[f'{parts[0]}/{parts[1]}'] += 1
+              else:
+                  prefixes[parts[0]] += 1
+
+          print('Mapping coverage by source:')
+          for p, c in sorted(prefixes.items()):
+              print(f'  {p}: {c}')
+          "
+          echo ""
+          echo "Ready for preprocessing! Run job-preprocess-fire-test.yaml next."
+          echo "========================================="
+
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        - name: FIRE_DATASET
+          value: "PengxiangLi/FIRE"
+
+        - name: SPLITS
+          value: "train test"
+
+        # Only retry datasets with coverage below this threshold (0.0-1.0)
+        - name: MIN_COVERAGE
+          value: "0.5"
+
+        resources:
+          requests:
+            memory: "32Gi"
+            cpu: "2"
+          limits:
+            memory: "32Gi"
+            cpu: "2"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+
+      restartPolicy: Never
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc

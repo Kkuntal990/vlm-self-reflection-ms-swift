@@ -8,7 +8,9 @@ Production Kubernetes platform for VLM fine-tuning with **ms-swift**, **PyTorch 
 **Models**: Qwen2.5-VL-7B, Qwen3-8B, Qwen3-VL-32B
 **Tech Stack**: ms-swift, PyTorch DDP, Kubernetes, LoRA, HuggingFace
 
-## Code Style and Standards
+## How to run the code ? 
+
+Always use 'uv' for running. 
 
 ### Linting Commands
 

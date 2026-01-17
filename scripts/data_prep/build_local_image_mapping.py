@@ -24,6 +24,10 @@ LOCAL_DATASETS = {
         "fire_prefix": "geoqa+/images/",
         "local_dir": "/outputs/geoqa_plus/images",
     },
+    "geoqa_plus_test": {
+        "fire_prefix": "geoqa+/test-images/",
+        "local_dir": "/outputs/geoqa_plus/images",
+    },
 }
 
 

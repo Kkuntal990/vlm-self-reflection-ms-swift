@@ -1,0 +1,182 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fire-preprocess-test-job
+  labels:
+    app: ms-swift
+    task: fire-preprocessing-test
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: fire-preprocessing-test
+    spec:
+      containers:
+      - name: fire-preprocessor
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "FIRE Dataset Preprocessing - TEST SPLIT ONLY"
+          echo "Using Updated Mapping v3"
+          echo "========================================="
+          echo ""
+          echo "Dataset: ${DATASET_ID}"
+          echo "Mapping file: ${MAPPING_FILE}"
+          echo "Output dir: ${OUTPUT_DIR}"
+          echo "Image dir: ${IMAGE_DIR}"
+          echo ""
+
+          # Verify mapping file exists
+          if [ ! -f "${MAPPING_FILE}" ]; then
+            echo "ERROR: Mapping file not found: ${MAPPING_FILE}"
+            echo "Run job-build-test-mapping.yaml first!"
+            exit 1
+          fi
+
+          echo "Mapping file found ($(du -h ${MAPPING_FILE} | cut -f1))"
+
+          # Show mapping statistics before processing
+          python -c "
+          import json
+          from collections import Counter
+
+          with open('${MAPPING_FILE}') as f:
+              mapping = json.load(f)
+
+          print(f'Total mappings available: {len(mapping)}')
+          print()
+
+          prefixes = Counter()
+          for k in mapping.keys():
+              parts = k.split('/')
+              if len(parts) >= 2:
+                  prefixes[f'{parts[0]}/{parts[1]}'] += 1
+              else:
+                  prefixes[parts[0]] += 1
+
+          print('Top 20 sources in mapping:')
+          for p, c in prefixes.most_common(20):
+              print(f'  {p}: {c}')
+          "
+          echo ""
+
+          # Run preprocessing for TEST SPLIT ONLY
+          echo "Processing TEST split with updated mapping..."
+          python /workspace/scripts/data_prep/prepare_fire_sharegpt.py \
+            --dataset_id "${DATASET_ID}" \
+            --output_dir "${OUTPUT_DIR}" \
+            --image_dir "${IMAGE_DIR}" \
+            --mapping_file "${MAPPING_FILE}" \
+            --max_samples ${MAX_SAMPLES} \
+            --splits test
+
+          echo ""
+          echo "========================================="
+          echo "TEST Split Preprocessing Complete"
+          echo "========================================="
+          echo ""
+          echo "Output files:"
+          ls -lh ${OUTPUT_DIR}/
+          echo ""
+          echo "Sample count:"
+          wc -l ${OUTPUT_DIR}/fire_sharegpt_test.jsonl 2>/dev/null || echo "No test JSONL found"
+          echo ""
+          echo "Statistics:"
+          cat ${OUTPUT_DIR}/stats.json | python -m json.tool
+          echo ""
+
+          # Calculate coverage improvement
+          python -c "
+          import json
+
+          with open('${OUTPUT_DIR}/stats.json') as f:
+              stats = json.load(f)
+
+          test = stats.get('test', {})
+          processed = test.get('samples_processed', 0)
+          skipped = test.get('samples_skipped', 0)
+          total = processed + skipped
+
+          if total > 0:
+              coverage = processed / total * 100
+              print(f'=== TEST SPLIT COVERAGE ===')
+              print(f'Processed: {processed}')
+              print(f'Skipped: {skipped}')
+              print(f'Total: {total}')
+              print(f'Coverage: {coverage:.1f}%')
+              print()
+
+              # Compare with previous version
+              print('Previous version (v2): 34.9% (3,839 / 11,006)')
+              print(f'Current version (v3): {coverage:.1f}% ({processed} / {total})')
+              improvement = coverage - 34.9
+              print(f'Improvement: +{improvement:.1f}%')
+          "
+          echo ""
+
+          # Show sample output
+          if [ -f "${OUTPUT_DIR}/fire_sharegpt_test.jsonl" ]; then
+            echo "First test example (verifying image path format):"
+            head -1 ${OUTPUT_DIR}/fire_sharegpt_test.jsonl | python -m json.tool
+            echo ""
+          fi
+
+          echo "========================================="
+          echo "Done! Test data ready at: ${OUTPUT_DIR}"
+          echo "========================================="
+
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        - name: DATASET_ID
+          value: "PengxiangLi/FIRE"
+
+        - name: MAPPING_FILE
+          value: "/outputs/fire_image_mapping_complete_v3.json"
+
+        - name: OUTPUT_DIR
+          value: "/outputs/fire_preprocessed_v3"
+
+        - name: IMAGE_DIR
+          value: "/outputs/fire_images_v3"
+
+        - name: MAX_SAMPLES
+          value: "0"  # 0 = all samples
+
+        resources:
+          requests:
+            memory: "64Gi"
+            cpu: "2"
+          limits:
+            memory: "64Gi"
+            cpu: "2"
+
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        - name: outputs-volume
+          mountPath: /outputs
+
+      restartPolicy: Never
+
+      volumes:
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
