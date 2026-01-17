@@ -204,9 +204,14 @@ class VLMInference:
     ) -> dict | None:
         """Generate final response from partial conversation (Mode 1).
 
-        Given a conversation history with question, image, responses, and feedback,
-        generate only the final response. The output includes the full conversation
-        history up to the point of generation.
+        Given a complete conversation from the dataset, feed all turns EXCEPT
+        the last assistant response, then generate only the final response.
+        This tests whether the model can produce a good final response given
+        full conversation context.
+
+        For a conversation with N turns:
+        - Feed: question + image + response1 + feedback1 + ... + response(N-1) + feedback(N-1)
+        - Generate: response N (the last turn's response)
 
         Args:
             sample: Sample dict with 'conversation' and 'images' keys
@@ -214,7 +219,7 @@ class VLMInference:
                     "conversation": [
                         {"human": "question", "assistant": "response1"},
                         {"human": "feedback1", "assistant": "response2"},
-                        {"human": "feedback2"}  # No assistant - generate this
+                        {"human": "feedback2", "assistant": "response3"}  # GT response3 NOT fed
                     ],
                     "images": ["path/to/image.jpg"]
                 }
@@ -227,9 +232,10 @@ class VLMInference:
                 "sample_id": str,
                 "mode": "continuation",
                 "image_path": str,
-                "conversation_history": [...],  # Full history up to generation
-                "final_prompt": str,  # The prompt that triggered generation
+                "conversation_history": [...],  # History up to generation (no GT for last turn)
+                "final_prompt": str,  # The feedback that triggered generation
                 "generated_response": str,
+                "ground_truth_response": str,  # GT response for comparison
                 "context_turns": int,  # Number of complete turns before generation
                 "generation_config": {...}
             }
@@ -246,6 +252,10 @@ class VLMInference:
             logger.warning(f"Sample {sample_id} has no conversation, skipping")
             return None
 
+        if len(conversation) < 1:
+            logger.warning(f"Sample {sample_id} has empty conversation, skipping")
+            return None
+
         # Resolve image path
         image_path = images[0]
         if not os.path.isabs(image_path):
@@ -256,14 +266,20 @@ class VLMInference:
             return None
 
         # Build messages from conversation history
+        # We feed ALL turns EXCEPT the last assistant response
         messages = []
         conversation_history = []  # Human-readable history for output
         context_turns = 0
         final_prompt = None
+        ground_truth_response = None
+
+        num_turns = len(conversation)
 
         for i, turn in enumerate(conversation):
             human_content = turn.get("human", "")
+            is_last_turn = i == num_turns - 1
 
+            # Add the human/user message (question or feedback)
             if i == 0:
                 # First turn includes image
                 clean_question = human_content.replace("<image>", "").strip()
@@ -288,19 +304,25 @@ class VLMInference:
                     "has_image": False,
                 })
 
-            # Add assistant response if present
-            if "assistant" in turn and turn["assistant"]:
-                messages.append({"role": "assistant", "content": turn["assistant"]})
-                conversation_history.append({
-                    "role": "assistant",
-                    "content": turn["assistant"],
-                })
-                context_turns += 1
-            else:
+            # Add assistant response ONLY if this is NOT the last turn
+            # For the last turn, we want to GENERATE the response, not feed GT
+            if is_last_turn:
                 # This is the turn we need to generate
                 final_prompt = human_content
+                # Save ground truth for comparison
+                ground_truth_response = turn.get("assistant", "")
+            else:
+                # Feed the GT assistant response for earlier turns
+                assistant_response = turn.get("assistant", "")
+                if assistant_response:
+                    messages.append({"role": "assistant", "content": assistant_response})
+                    conversation_history.append({
+                        "role": "assistant",
+                        "content": assistant_response,
+                    })
+                    context_turns += 1
 
-        # Generate the response
+        # Generate the response for the last turn
         config = generation_config or {}
         response = self.generate(messages, config)
 
@@ -318,7 +340,9 @@ class VLMInference:
             "conversation_history": conversation_history,
             "final_prompt": final_prompt,
             "generated_response": response,
+            "ground_truth_response": ground_truth_response,
             "context_turns": context_turns,
+            "total_turns": num_turns,
             "generation_config": config,
         }
 

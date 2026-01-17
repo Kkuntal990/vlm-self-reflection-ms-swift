@@ -1,0 +1,252 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vlm-inference-job
+  labels:
+    app: ms-swift
+    task: vlm-inference
+    model: qwen2-5-vl-7b
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: vlm-inference
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: inference
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "VLM Inference Pipeline"
+          echo "========================================="
+          echo ""
+          echo "Mode: ${INFERENCE_MODE}"
+          echo "Model: ${MODEL_PATH}"
+          echo "Dataset: ${DATASET_PATH}"
+          echo "Image Dir: ${IMAGE_BASE_DIR}"
+          echo "Output: ${OUTPUT_PATH}"
+          echo "Max Samples: ${MAX_SAMPLES} (0 = all)"
+          echo ""
+          echo "Generation Config:"
+          echo "  Temperature: ${TEMPERATURE}"
+          echo "  Top-P: ${TOP_P}"
+          echo "  Max New Tokens: ${MAX_NEW_TOKENS}"
+          echo "  Max Turns: ${MAX_TURNS}"
+          echo ""
+          echo "System Prompt: ${SYSTEM_PROMPT_MODE}"
+          echo ""
+
+          # Verify GPU availability
+          echo "GPU Status:"
+          nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+          echo ""
+
+          # Verify dataset exists
+          if [ ! -f "${DATASET_PATH}" ]; then
+            echo "ERROR: Test dataset not found: ${DATASET_PATH}"
+            echo ""
+            echo "Available files in /outputs/fire_preprocessed_v2/:"
+            ls -lh /outputs/fire_preprocessed_v2/ 2>/dev/null || echo "Directory not found"
+            exit 1
+          fi
+
+          echo "Dataset found:"
+          ls -lh "${DATASET_PATH}"
+          echo "Sample count: $(wc -l < "${DATASET_PATH}")"
+          echo ""
+
+          # Verify model checkpoint exists
+          if [ -d "${MODEL_PATH}" ]; then
+            echo "Model checkpoint found:"
+            ls -lh "${MODEL_PATH}/" | head -5
+            echo ""
+          else
+            echo "Model path: ${MODEL_PATH} (will be downloaded if HuggingFace ID)"
+            echo ""
+          fi
+
+          # Verify image directory exists
+          if [ -d "${IMAGE_BASE_DIR}" ]; then
+            echo "Image directory found:"
+            echo "Image count: $(ls -1 "${IMAGE_BASE_DIR}" | wc -l)"
+            echo ""
+          else
+            echo "WARNING: Image directory not found: ${IMAGE_BASE_DIR}"
+            echo ""
+          fi
+
+          # Create output directory
+          OUTPUT_DIR=$(dirname "${OUTPUT_PATH}")
+          mkdir -p "${OUTPUT_DIR}"
+
+          # Build the command
+          CMD="python /workspace/scripts/run_inference.py \
+            --model_path ${MODEL_PATH} \
+            --dataset_path ${DATASET_PATH} \
+            --image_base_dir ${IMAGE_BASE_DIR} \
+            --mode ${INFERENCE_MODE} \
+            --output_path ${OUTPUT_PATH} \
+            --temperature ${TEMPERATURE} \
+            --top_p ${TOP_P} \
+            --max_new_tokens ${MAX_NEW_TOKENS} \
+            --max_turns ${MAX_TURNS} \
+            --max_samples ${MAX_SAMPLES}"
+
+          # Add system prompt configuration
+          if [ "${SYSTEM_PROMPT_MODE}" = "none" ]; then
+            CMD="${CMD} --no_system_prompt"
+          elif [ "${SYSTEM_PROMPT_MODE}" = "custom" ] && [ -n "${CUSTOM_SYSTEM_PROMPT}" ]; then
+            CMD="${CMD} --system_prompt \"${CUSTOM_SYSTEM_PROMPT}\""
+          fi
+          # else: use default system prompt (no flag needed)
+
+          # Add flash attention flag if disabled
+          if [ "${DISABLE_FLASH_ATTN}" = "true" ]; then
+            CMD="${CMD} --no_flash_attn"
+          fi
+
+          echo "========================================="
+          echo "Running Inference..."
+          echo "========================================="
+          echo ""
+          echo "Command: ${CMD}"
+          echo ""
+
+          # Run inference
+          eval ${CMD}
+
+          echo ""
+          echo "========================================="
+          echo "Inference Complete"
+          echo "========================================="
+          echo ""
+          echo "Results saved to: ${OUTPUT_PATH}"
+          ls -lh "${OUTPUT_PATH}" 2>/dev/null || echo "Output file not found"
+          echo ""
+
+          # Show sample output
+          if [ -f "${OUTPUT_PATH}" ]; then
+            echo "First result sample:"
+            head -1 "${OUTPUT_PATH}" | python -m json.tool 2>/dev/null || head -1 "${OUTPUT_PATH}"
+            echo ""
+            echo "Total results: $(wc -l < "${OUTPUT_PATH}")"
+          fi
+
+        env:
+        # HuggingFace token (for downloading models)
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # ============================================
+        # INFERENCE CONFIGURATION - UPDATE THESE
+        # ============================================
+
+        # Inference mode: "continuation" or "full_generation"
+        - name: INFERENCE_MODE
+          value: "continuation"
+
+        # Model checkpoint path
+        - name: MODEL_PATH
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-loss-scale-default/v0-20260110-220519/checkpoint-1248"
+
+        # Dataset path (test set)
+        - name: DATASET_PATH
+          value: "/outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl"
+
+        # Base directory for images
+        - name: IMAGE_BASE_DIR
+          value: "/outputs/fire_images_v2"
+
+        # Output path for inference results
+        - name: OUTPUT_PATH
+          value: "/outputs/inference_v1/default_v1_continuation_results.jsonl"
+
+        # Max samples to process (0 = all)
+        - name: MAX_SAMPLES
+          value: "0"
+
+        # ============================================
+        # GENERATION PARAMETERS
+        # ============================================
+
+        - name: TEMPERATURE
+          value: "0.7"
+        - name: TOP_P
+          value: "0.9"
+        - name: MAX_NEW_TOKENS
+          value: "512"
+        - name: MAX_TURNS
+          value: "3"
+
+        # ============================================
+        # SYSTEM PROMPT CONFIGURATION
+        # ============================================
+        # Options: "default" (use built-in prompt), "none" (no system prompt), "custom"
+        - name: SYSTEM_PROMPT_MODE
+          value: "default"
+
+        # Custom system prompt (only used if SYSTEM_PROMPT_MODE=custom)
+        - name: CUSTOM_SYSTEM_PROMPT
+          value: ""
+
+        # ============================================
+        # HARDWARE CONFIGURATION
+        # ============================================
+
+        # Disable flash attention (set to "true" to disable)
+        - name: DISABLE_FLASH_ATTN
+          value: "false"
+
+        # Python and CUDA settings
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+        resources:
+          requests:
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "2"
+          limits:
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "2"
+
+        volumeMounts:
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      tolerations:
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
+
+      volumes:
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
