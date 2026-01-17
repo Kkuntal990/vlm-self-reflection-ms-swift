@@ -147,18 +147,18 @@ Maps FIRE image paths to locally downloaded files.
 
 ```bash
 # Build HuggingFace mappings (run on cluster)
-python scripts/build_fire_image_mapping.py \
+python scripts/data_prep/build_fire_image_mapping.py \
     --fire_dataset PengxiangLi/FIRE \
     --output /outputs/fire_image_mapping.json \
     --cache_dir /cache
 
 # Build local mappings (for manually downloaded datasets)
-python scripts/build_local_image_mapping.py \
+python scripts/data_prep/build_local_image_mapping.py \
     --fire_paths /workspace/image_sources.txt \
     --output /outputs/local_image_mapping.json
 
 # Merge both mappings
-python scripts/merge_mappings.py \
+python scripts/data_prep/merge_mappings.py \
     --hf_mapping /outputs/fire_image_mapping.json \
     --local_mapping /outputs/local_image_mapping.json \
     --output /outputs/fire_image_mapping_complete.json
@@ -168,7 +168,7 @@ python scripts/merge_mappings.py \
 
 ## Preprocessing Scripts
 
-### `scripts/prepare_fire_sharegpt.py`
+### `scripts/data_prep/prepare_fire_sharegpt.py`
 
 Main preprocessing script that converts FIRE dataset to ShareGPT format for ms-swift training.
 
@@ -183,19 +183,19 @@ Main preprocessing script that converts FIRE dataset to ShareGPT format for ms-s
 
 ```bash
 # Full preprocessing with mapping file
-python scripts/prepare_fire_sharegpt.py \
+python scripts/data_prep/prepare_fire_sharegpt.py \
     --output_dir /outputs/fire_bc \
     --mapping_file /outputs/fire_image_mapping_complete.json \
     --splits train test
 
 # Quick test (no images)
-python scripts/prepare_fire_sharegpt.py \
+python scripts/data_prep/prepare_fire_sharegpt.py \
     --output_dir ./test_output \
     --skip-images \
     --max_samples 100
 
 # Filter specific sources only
-python scripts/prepare_fire_sharegpt.py \
+python scripts/data_prep/prepare_fire_sharegpt.py \
     --output_dir /outputs/fire_coco_only \
     --mapping_file /outputs/fire_image_mapping.json \
     --filter_sources coco textvqa
@@ -216,7 +216,7 @@ python scripts/prepare_fire_sharegpt.py \
 }
 ```
 
-### `scripts/build_fire_image_mapping.py`
+### `scripts/data_prep/build_fire_image_mapping.py`
 
 Builds mappings from FIRE image paths to HuggingFace dataset indices.
 
@@ -238,7 +238,7 @@ DATASET_SOURCES = {
 }
 ```
 
-### `scripts/build_local_image_mapping.py`
+### `scripts/data_prep/build_local_image_mapping.py`
 
 Creates mappings for manually downloaded datasets.
 
@@ -257,15 +257,15 @@ LOCAL_DATASETS = {
 }
 ```
 
-### `scripts/merge_mappings.py`
+### `scripts/data_prep/merge_mappings.py`
 
 Merges HuggingFace and local mappings into a single file.
 
-### `scripts/prepare_fire_feedback_sft.py`
+### `scripts/data_prep/prepare_fire_feedback_sft.py`
 
 Alternative preprocessing for feedback-based SFT training format.
 
-### `scripts/analyze_dataset_lengths.py`
+### `scripts/data_prep/analyze_dataset_lengths.py`
 
 Analyzes token lengths in preprocessed datasets for batch optimization.
 
@@ -362,7 +362,7 @@ kubectl exec -it <pod> -- ls -lh /outputs/fire_bc/
 
 ```bash
 # Quick test without images
-python scripts/prepare_fire_sharegpt.py \
+python scripts/data_prep/prepare_fire_sharegpt.py \
     --output_dir ./test_output \
     --skip-images \
     --max_samples 50 \
@@ -382,7 +382,7 @@ cat data/fire_preprocessed_v2/stats.json | python -m json.tool
 wc -l data/fire_preprocessed_v2/*.jsonl
 
 # Analyze token lengths
-python scripts/analyze_dataset_lengths.py \
+python scripts/data_prep/analyze_dataset_lengths.py \
     --input data/fire_preprocessed_v2/fire_sharegpt_train.jsonl
 ```
 

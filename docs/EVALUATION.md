@@ -17,7 +17,7 @@ This guide explains how to evaluate your fine-tuned VLM's self-refinement capabi
 
 **Quick Test Command:**
 ```bash
-python /workspace/scripts/evaluate_self_refinement.py \
+python /workspace/scripts/evaluation/evaluate_self_refinement.py \
     --dataset_path /outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl \
     --mode ground_truth --max_samples 5 --output_dir /outputs/test_eval
 ```
@@ -149,7 +149,7 @@ Scores the existing FIRE dataset responses to validate the reward model.
 #### From Terminal
 
 ```bash
-python /workspace/scripts/evaluate_self_refinement.py \
+python /workspace/scripts/evaluation/evaluate_self_refinement.py \
     --dataset_path /outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl \
     --output_dir /outputs/eval_ground_truth \
     --mode ground_truth \
@@ -161,7 +161,7 @@ python /workspace/scripts/evaluate_self_refinement.py \
 
 ```python
 import sys
-sys.path.insert(0, '/workspace/scripts')
+sys.path.insert(0, '/workspace/scripts/evaluation')
 
 from score_with_reward_model import SkyworkVLRewardScorer
 import json
@@ -215,7 +215,7 @@ Tests your fine-tuned model's self-refinement capability.
 #### From Terminal
 
 ```bash
-python /workspace/scripts/evaluate_self_refinement.py \
+python /workspace/scripts/evaluation/evaluate_self_refinement.py \
     --dataset_path /outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl \
     --model_path /outputs/qwen2_5vl-7b-fire-full-sft/checkpoint-final \
     --output_dir /outputs/eval_generated \
@@ -231,7 +231,7 @@ python /workspace/scripts/evaluate_self_refinement.py \
 
 ```python
 import sys
-sys.path.insert(0, '/workspace/scripts')
+sys.path.insert(0, '/workspace/scripts/evaluation')
 
 from generate_refinements import VLMInferenceEngine, generate_refinement_dialogue
 from score_with_reward_model import SkyworkVLRewardScorer
@@ -295,7 +295,7 @@ After running evaluation, analyze the results:
 #### From Terminal
 
 ```bash
-python /workspace/scripts/analyze_refinement_metrics.py \
+python /workspace/scripts/evaluation/analyze_refinement_metrics.py \
     --results_path /outputs/eval_generated/sample_results.jsonl \
     --output_dir /outputs/eval_generated/analysis \
     --n_extreme 10
@@ -305,7 +305,7 @@ python /workspace/scripts/analyze_refinement_metrics.py \
 
 ```python
 import sys
-sys.path.insert(0, '/workspace/scripts')
+sys.path.insert(0, '/workspace/scripts/evaluation')
 
 from analyze_refinement_metrics import (
     load_results,
@@ -348,7 +348,7 @@ print(f"\nPlots saved to {output_dir}")
 Compare ground truth vs generated, or different model checkpoints:
 
 ```bash
-python /workspace/scripts/analyze_refinement_metrics.py \
+python /workspace/scripts/evaluation/analyze_refinement_metrics.py \
     --results_path /outputs/eval_ground_truth/sample_results.jsonl \
     --compare_path /outputs/eval_generated/sample_results.jsonl \
     --output_dir /outputs/comparison_analysis

@@ -8,6 +8,46 @@ Production Kubernetes platform for VLM fine-tuning with **ms-swift**, **PyTorch 
 **Models**: Qwen2.5-VL-7B, Qwen3-8B, Qwen3-VL-32B
 **Tech Stack**: ms-swift, PyTorch DDP, Kubernetes, LoRA, HuggingFace
 
+## Code Style and Standards
+
+### Linting Commands
+
+```bash
+# Format all Python files
+ruff format scripts/
+
+# Lint all Python files
+ruff check scripts/
+
+# Lint and auto-fix
+ruff check scripts/ --fix
+
+# Type check (optional)
+mypy scripts/
+```
+
+### MUST Follow
+
+1. **Imports**: Standard library first, then third-party, then local. Alphabetized within groups.
+2. **Type Hints**: Required on all function parameters and return types.
+3. **Docstrings**: Google-style with Args/Returns sections.
+4. **Naming**: snake_case for functions/variables, PascalCase for classes, UPPER_SNAKE_CASE for constants.
+5. **Logging**: Use the standard logging pattern with `logging.basicConfig()` and `logger = logging.getLogger(__name__)`.
+6. **Entry Points**: All scripts MUST use `if __name__ == "__main__": main()` guard.
+7. **Dataclasses**: Use `@dataclass` for structured results with `to_dict()` methods.
+
+### MUST NOT Change
+
+1. **Lazy Imports in Model Classes**: Do NOT move imports from `__init__` methods to module level in model wrapper classes (e.g., `SkyworkVLRewardScorer`, `VLMInferenceEngine`). This is intentional for performance.
+2. **sys.path.insert Pattern**: Do NOT change local import pattern in scripts directory.
+
+### Detailed Rules
+
+See `.claude/rules/` for comprehensive style guides:
+
+- [.claude/rules/python-style.md](.claude/rules/python-style.md) - Core Python conventions
+- [.claude/rules/ml-patterns.md](.claude/rules/ml-patterns.md) - ML-specific patterns (dataclasses, model loading, etc.)
+
 ## Quick Commands
 
 ### Docker (Two-Tier Build)
@@ -88,9 +128,10 @@ kubectl cp $POD_NAME:/outputs/ ./local-outputs/
 
 ### Scripts
 
-- [scripts/run_full_sft_qwen3vl_fire_8gpu.sh](scripts/run_full_sft_qwen3vl_fire_8gpu.sh) - 8-GPU full fine-tuning
-- [scripts/prepare_fire_sharegpt.py](scripts/prepare_fire_sharegpt.py) - FIRE dataset preprocessing
-- [scripts/env.sh](scripts/env.sh) - Environment configuration
+- [scripts/training/run_full_sft_qwen3vl_fire_8gpu.sh](scripts/training/run_full_sft_qwen3vl_fire_8gpu.sh) - 8-GPU full fine-tuning
+- [scripts/data_prep/prepare_fire_sharegpt.py](scripts/data_prep/prepare_fire_sharegpt.py) - FIRE dataset preprocessing
+- [scripts/training/env.sh](scripts/training/env.sh) - Environment configuration
+- [scripts/evaluation/evaluate_self_refinement.py](scripts/evaluation/evaluate_self_refinement.py) - Evaluation pipeline
 
 ### Kubernetes Jobs
 
@@ -127,7 +168,7 @@ kubectl cp $POD_NAME:/outputs/ ./local-outputs/
 
 ```bash
 # FIRE dataset (10 samples, no images)
-python scripts/prepare_fire_sharegpt.py \
+python scripts/data_prep/prepare_fire_sharegpt.py \
   --output_dir ./test_fire_local/outputs \
   --image_dir ./test_fire_local/images \
   --max_samples 10 \

@@ -84,7 +84,7 @@ spec:
 
           if [ "${EVAL_MODE}" = "ground_truth" ]; then
             # Ground truth mode: score existing dataset responses
-            python /workspace/scripts/evaluate_self_refinement.py \
+            python /workspace/scripts/evaluation/evaluate_self_refinement.py \
               --dataset_path "${DATASET_PATH}" \
               --output_dir "${OUTPUT_DIR}/evaluation_results" \
               --mode ground_truth \
@@ -93,7 +93,7 @@ spec:
               --plateau_threshold ${PLATEAU_THRESHOLD}
           else
             # Generated mode: generate responses then score
-            python /workspace/scripts/evaluate_self_refinement.py \
+            python /workspace/scripts/evaluation/evaluate_self_refinement.py \
               --dataset_path "${DATASET_PATH}" \
               --model_path "${MODEL_PATH}" \
               --output_dir "${OUTPUT_DIR}/evaluation_results" \
@@ -114,7 +114,7 @@ spec:
           echo ""
 
           # Run detailed analysis
-          python /workspace/scripts/analyze_refinement_metrics.py \
+          python /workspace/scripts/evaluation/analyze_refinement_metrics.py \
             --results_path "${OUTPUT_DIR}/evaluation_results/sample_results.jsonl" \
             --output_dir "${OUTPUT_DIR}/evaluation_results/analysis" \
             --n_extreme 10

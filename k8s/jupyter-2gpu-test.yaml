@@ -42,7 +42,7 @@ spec:
           key: token
           optional: true
 
-    # Cache directories (from scripts/env.sh)
+    # Cache directories (from scripts/training/env.sh)
     - name: HF_HOME
       value: "/cache/hf"
     - name: TRANSFORMERS_CACHE

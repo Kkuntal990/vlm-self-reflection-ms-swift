@@ -8,8 +8,8 @@ A complete Kubernetes-based 2-GPU DDP training setup with:
 ✓ Dockerfile (CUDA 12.1 + ms-swift)
 ✓ requirements.txt (all Python dependencies)
 ✓ .dockerignore (optimized build)
-✓ scripts/env.sh (environment configuration)
-✓ scripts/run_sft_ddp.sh (main training script)
+✓ scripts/training/env.sh (environment configuration)
+✓ scripts/training/run_sft_ddp.sh (main training script)
 ✓ k8s/pvc-cache.yaml (rook-ceph-block, 300Gi)
 ✓ k8s/pvc-outputs.yaml (rook-cephfs, 300Gi)
 ✓ k8s/job-sft-qwen3-8b-2gpu.yaml (2-GPU Job)
@@ -173,7 +173,7 @@ imagePullSecrets:
    - Lines 66-90: Environment variables (dataset, hyperparameters)
    - Lines 92-99: Resource requests/limits (adjust for your GPU type)
 
-2. **scripts/run_sft_ddp.sh**
+2. **scripts/training/run_sft_ddp.sh**
    - Only if you need custom ms-swift arguments
 
 3. **k8s/pvc-*.yaml**
@@ -185,11 +185,11 @@ imagePullSecrets:
 ```bash
 # Verify all files exist
 ls -lh Dockerfile requirements.txt .dockerignore
-ls -lh scripts/*.sh
+ls -lh scripts/training/*.sh
 ls -lh k8s/*.yaml
 
 # Verify script permissions
-ls -l scripts/*.sh | grep rwx
+ls -l scripts/training/*.sh | grep rwx
 
 # Validate YAML syntax
 kubectl apply --dry-run=client -f k8s/

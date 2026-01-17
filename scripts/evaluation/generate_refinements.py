@@ -29,13 +29,12 @@ Reference:
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import torch
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,7 +108,7 @@ class VLMInferenceEngine:
         self,
         question: str,
         image_path: str,
-        conversation_history: Optional[List[Dict]] = None,
+        conversation_history: list[dict] | None = None,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -177,14 +176,12 @@ class VLMInferenceEngine:
         # Decode only the generated part
         input_len = inputs["input_ids"].shape[1]
         generated_ids = generated_ids[:, input_len:]
-        response = self.processor.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )[0]
+        response = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
         return response.strip()
 
 
-def load_test_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
+def load_test_dataset(dataset_path: str, max_samples: int = 0) -> list[dict]:
     """Load test dataset in ShareGPT format.
 
     Args:
@@ -196,7 +193,7 @@ def load_test_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
     """
     samples = []
 
-    with open(dataset_path, "r") as f:
+    with open(dataset_path) as f:
         for i, line in enumerate(f):
             if max_samples > 0 and i >= max_samples:
                 break
@@ -209,11 +206,11 @@ def load_test_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
 
 def generate_refinement_dialogue(
     engine: VLMInferenceEngine,
-    sample: Dict,
+    sample: dict,
     max_turns: int = 3,
     use_gt_feedback: bool = True,
-    generation_config: Optional[Dict] = None,
-) -> Dict:
+    generation_config: dict | None = None,
+) -> dict:
     """Generate a multi-turn self-refinement dialogue.
 
     Args:
@@ -257,19 +254,24 @@ def generate_refinement_dialogue(
                 top_p=top_p,
             )
 
-            generated_conversation.append({
-                "human": original_question,
-                "assistant": response,
-                "is_generated": True,
-            })
+            generated_conversation.append(
+                {
+                    "human": original_question,
+                    "assistant": response,
+                    "is_generated": True,
+                }
+            )
 
             # Update history for next turn
             clean_question = original_question.replace("<image>", "").strip()
             messages_history = [
-                {"role": "user", "content": [
-                    {"type": "image", "image": image_path},
-                    {"type": "text", "text": clean_question},
-                ]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": image_path},
+                        {"type": "text", "text": clean_question},
+                    ],
+                },
                 {"role": "assistant", "content": response},
             ]
         else:
@@ -292,12 +294,14 @@ def generate_refinement_dialogue(
                 top_p=top_p,
             )
 
-            generated_conversation.append({
-                "human": feedback,
-                "assistant": response,
-                "is_generated": True,
-                "feedback_source": "ground_truth" if use_gt_feedback else "generated",
-            })
+            generated_conversation.append(
+                {
+                    "human": feedback,
+                    "assistant": response,
+                    "is_generated": True,
+                    "feedback_source": "ground_truth" if use_gt_feedback else "generated",
+                }
+            )
 
             # Update history
             messages_history.append({"role": "user", "content": feedback})
@@ -306,11 +310,13 @@ def generate_refinement_dialogue(
     # Also keep ground truth for comparison
     gt_conversation = []
     for turn in conversation[:max_turns]:
-        gt_conversation.append({
-            "human": turn["human"],
-            "assistant": turn["assistant"],
-            "is_generated": False,
-        })
+        gt_conversation.append(
+            {
+                "human": turn["human"],
+                "assistant": turn["assistant"],
+                "is_generated": False,
+            }
+        )
 
     return {
         "sample_id": sample.get("id", "unknown"),

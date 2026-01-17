@@ -39,7 +39,7 @@ spec:
           # 2. Download source datasets to HuggingFace cache
           # 3. Build {fire_path: {dataset, split, index}} mapping
           # Use --existing_mapping to extend previous run (skips datasets with good coverage)
-          python /workspace/scripts/build_fire_image_mapping.py \
+          python /workspace/scripts/data_prep/build_fire_image_mapping.py \
             --fire_dataset "PengxiangLi/FIRE" \
             --cache_dir /cache \
             --output_mapping /outputs/fire_image_mapping.json \

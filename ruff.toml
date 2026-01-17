@@ -1,0 +1,76 @@
+# Ruff configuration for VLM Self-Reflection
+# Matches existing code patterns observed in the codebase
+
+# Target Python 3.10+ (for type union syntax |)
+target-version = "py310"
+
+# Line length matches observed patterns in ML code
+line-length = 100
+
+# Exclude virtual environments and build artifacts
+exclude = [
+    ".venv",
+    "__pycache__",
+    "*.egg-info",
+    "build",
+    "dist",
+    "data/notebooks",
+]
+
+[lint]
+# Enable rules that match existing patterns
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "SIM",    # flake8-simplify
+]
+
+# Ignore rules that conflict with existing patterns
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "E402",   # Module level import not at top (needed for sys.path manipulation)
+    "B008",   # Do not perform function calls in argument defaults
+    "B905",   # zip without strict= (Python 3.10+)
+    "SIM108", # Use ternary operator (readability preference)
+]
+
+# Per-file rule adjustments
+[lint.per-file-ignores]
+# Allow unused imports in __init__.py (re-exports)
+"scripts/judges/__init__.py" = ["F401"]
+# Data extraction scripts may have different patterns
+"data/*.py" = ["E501"]
+
+[lint.isort]
+# Match existing import ordering
+known-first-party = [
+    "score_with_reward_model",
+    "vlm_judge",
+    "generate_refinements",
+    "judges",
+]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+force-single-line = false
+combine-as-imports = true
+lines-after-imports = 2
+
+[format]
+# Use double quotes (matches existing code)
+quote-style = "double"
+
+# Indent with 4 spaces
+indent-style = "space"
+
+# Preserve trailing commas
+skip-magic-trailing-comma = false
+
+# Unix line endings
+line-ending = "lf"
+
+# Format docstrings
+docstring-code-format = true

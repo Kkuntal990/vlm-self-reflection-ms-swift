@@ -52,7 +52,7 @@ spec:
           # Includes Vision-FLAN (20,257 images) and GeoQA+ (2,253 images)
 
           echo "Processing TRAIN and TEST splits with complete mapping..."
-          python /workspace/scripts/prepare_fire_sharegpt.py \
+          python /workspace/scripts/data_prep/prepare_fire_sharegpt.py \
             --dataset_id "${DATASET_ID}" \
             --output_dir /outputs/fire_preprocessed_v2 \
             --image_dir /outputs/fire_images_v2 \

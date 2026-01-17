@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Source environment configuration
-source /workspace/scripts/env.sh
+source /workspace/scripts/training/env.sh
 
 # Training configuration with sensible defaults
 MODEL_ID="${MODEL_ID:-Qwen/Qwen3-8B}"

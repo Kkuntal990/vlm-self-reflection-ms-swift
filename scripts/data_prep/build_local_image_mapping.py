@@ -9,9 +9,9 @@ AN and GeoQA+.
 import json
 import logging
 from pathlib import Path
-from typing import Dict
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Configuration for local datasets
@@ -32,7 +32,7 @@ def build_local_mapping(fire_image_paths_file: str, output_file: str):
 
     # Load FIRE image paths
     logger.info(f"Loading FIRE image paths from {fire_image_paths_file}")
-    with open(fire_image_paths_file, 'r') as f:
+    with open(fire_image_paths_file) as f:
         fire_paths = set()
         for line in f:
             line = line.strip()
@@ -66,14 +66,11 @@ def build_local_mapping(fire_image_paths_file: str, output_file: str):
 
         for fire_path in relevant_paths:
             # Get relative path after prefix
-            relative_path = fire_path[len(fire_prefix):]
+            relative_path = fire_path[len(fire_prefix) :]
             local_file = local_dir / relative_path
 
             if local_file.exists():
-                mapping[fire_path] = {
-                    "local_path": str(local_file),
-                    "source": dataset_name
-                }
+                mapping[fire_path] = {"local_path": str(local_file), "source": dataset_name}
                 mapped_count += 1
             else:
                 missing_count += 1
@@ -87,7 +84,7 @@ def build_local_mapping(fire_image_paths_file: str, output_file: str):
 
     # Save mapping
     logger.info(f"\nSaving local mapping to {output_file}")
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         json.dump(mapping, f, indent=2)
 
     logger.info(f"Total paths mapped: {len(mapping)}")
@@ -96,7 +93,7 @@ def build_local_mapping(fire_image_paths_file: str, output_file: str):
     logger.info("\n" + "=" * 60)
     logger.info("LOCAL IMAGE MAPPING SUMMARY")
     logger.info("=" * 60)
-    for dataset_name in LOCAL_DATASETS.keys():
+    for dataset_name in LOCAL_DATASETS:
         count = sum(1 for v in mapping.values() if v.get("source") == dataset_name)
         logger.info(f"{dataset_name}: {count} images")
     logger.info(f"Total: {len(mapping)} images")
@@ -111,13 +108,13 @@ if __name__ == "__main__":
         "--fire_paths",
         type=str,
         default="/workspace/image_sources.txt",
-        help="File containing FIRE image paths"
+        help="File containing FIRE image paths",
     )
     parser.add_argument(
         "--output",
         type=str,
         default="/outputs/local_image_mapping.json",
-        help="Output mapping JSON file"
+        help="Output mapping JSON file",
     )
 
     args = parser.parse_args()

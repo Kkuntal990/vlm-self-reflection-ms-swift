@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # Source environment configuration
-source /workspace/scripts/env.sh
+source /workspace/scripts/training/env.sh
 
 # ============================================
 # Model Configuration

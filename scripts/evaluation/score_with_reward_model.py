@@ -34,12 +34,10 @@ Reference:
 import argparse
 import json
 import logging
-import os
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import torch
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,10 +84,10 @@ class SkyworkVLRewardScorer:
         logger.info(f"Initializing Skywork-VL-Reward scorer from {model_id}")
 
         # Lazy import to avoid loading heavy libraries until needed
+        from safetensors import safe_open
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
         from transformers.utils import cached_file
         from trl import AutoModelForCausalLMWithValueHead
-        from safetensors import safe_open
 
         # Load processor
         logger.info("Loading processor...")
@@ -120,12 +118,9 @@ class SkyworkVLRewardScorer:
 
         # Load value head weights
         logger.info("Loading value head weights...")
-        vhead_file = cached_file(
-            path_or_repo_id=model_id,
-            filename="value_head.safetensors"
-        )
+        vhead_file = cached_file(path_or_repo_id=model_id, filename="value_head.safetensors")
         with safe_open(vhead_file, framework="pt", device="cpu") as f:
-            vhead_params = {key: f.get_tensor(key) for key in f.keys()}
+            vhead_params = {key: f.get_tensor(key) for key in f}
         self.model.load_state_dict(vhead_params, strict=False)
 
         # Set to eval mode
@@ -139,8 +134,8 @@ class SkyworkVLRewardScorer:
         question: str,
         response: str,
         image_path: str,
-        context_history: Optional[List[Dict]] = None,
-    ) -> List[Dict]:
+        context_history: list[dict] | None = None,
+    ) -> list[dict]:
         """Build message list in Qwen2.5-VL format.
 
         Args:
@@ -194,7 +189,7 @@ class SkyworkVLRewardScorer:
         question: str,
         response: str,
         image_path: str,
-        context_history: Optional[List[Dict]] = None,
+        context_history: list[dict] | None = None,
     ) -> float:
         """Score a single response.
 
@@ -276,10 +271,10 @@ class SkyworkVLRewardScorer:
 
     def score_conversation_turns(
         self,
-        sample: Dict,
+        sample: dict,
         return_details: bool = False,
         isolated_scoring: bool = False,
-    ) -> Union[List[Dict], Dict]:
+    ) -> list[dict] | dict:
         """Score all turns in a multi-turn conversation.
 
         This method processes a ShareGPT format sample and scores each
@@ -357,18 +352,24 @@ class SkyworkVLRewardScorer:
             }
 
             if turn_idx > 0:
-                result["feedback_received"] = turn["human"][:100] + "..." if len(turn["human"]) > 100 else turn["human"]
+                result["feedback_received"] = (
+                    turn["human"][:100] + "..." if len(turn["human"]) > 100 else turn["human"]
+                )
                 result["score_delta"] = score - results[-1]["reward_score"]
 
             results.append(result)
 
             # Update context history for next turn
-            next_feedback = conversation[turn_idx + 1]["human"] if turn_idx + 1 < len(conversation) else None
-            context_history.append({
-                "human": turn["human"],
-                "assistant": response,
-                "feedback": next_feedback,
-            })
+            next_feedback = (
+                conversation[turn_idx + 1]["human"] if turn_idx + 1 < len(conversation) else None
+            )
+            context_history.append(
+                {
+                    "human": turn["human"],
+                    "assistant": response,
+                    "feedback": next_feedback,
+                }
+            )
 
         if not return_details:
             return results
@@ -382,8 +383,8 @@ class SkyworkVLRewardScorer:
             "absolute_improvement": scores[-1] - scores[0],  # kept for backward compatibility
             "score_delta": scores[-1] - scores[0],
             "reward_delta": (scores[-1] - scores[0]) / max(abs(scores[0]), 1.0),
-            "is_monotonic": all(scores[i] <= scores[i+1] for i in range(len(scores)-1)),
-            "improvements_per_turn": [scores[i+1] - scores[i] for i in range(len(scores)-1)],
+            "is_monotonic": all(scores[i] <= scores[i + 1] for i in range(len(scores) - 1)),
+            "improvements_per_turn": [scores[i + 1] - scores[i] for i in range(len(scores) - 1)],
             "scoring_mode": "isolated" if isolated_scoring else "contextual",
         }
 
@@ -392,9 +393,7 @@ class SkyworkVLRewardScorer:
 
 def parse_args():
     """Parse command line arguments for testing."""
-    parser = argparse.ArgumentParser(
-        description="Score VLM responses using Skywork-VL-Reward-7B"
-    )
+    parser = argparse.ArgumentParser(description="Score VLM responses using Skywork-VL-Reward-7B")
 
     # Single response scoring
     parser.add_argument(
@@ -442,8 +441,8 @@ def parse_args():
         "--isolated",
         action="store_true",
         help="Score each response in isolation (just image + question + response, "
-             "ignoring conversation history). Provides cleaner comparison without "
-             "context length effects.",
+        "ignoring conversation history). Provides cleaner comparison without "
+        "context length effects.",
     )
 
     return parser.parse_args()
@@ -463,7 +462,7 @@ def main():
     if args.sample_file:
         # Score a full conversation from file
         logger.info(f"Loading sample from {args.sample_file}")
-        with open(args.sample_file, "r") as f:
+        with open(args.sample_file) as f:
             sample = json.load(f)
 
         scoring_mode = "isolated" if args.isolated else "contextual"
@@ -493,7 +492,7 @@ def main():
         print(f"  Final Score: {metrics['final_score']:.2f}")
         print(f"  Absolute Improvement: {metrics['absolute_improvement']:.2f}")
         print(f"  Score Delta (Final - Initial): {metrics['score_delta']:.2f}")
-        print(f"  Reward Delta (normalized): {metrics['reward_delta']*100:.1f}%")
+        print(f"  Reward Delta (normalized): {metrics['reward_delta'] * 100:.1f}%")
         print(f"  Monotonic Improvement: {metrics['is_monotonic']}")
         print("=" * 60)
 

@@ -79,7 +79,7 @@ spec:
               # Start training
               echo "Starting multi-node feedback SFT training..."
               echo ""
-              /workspace/scripts/run_feedback_sft_qwen2_5vl_multinode.sh
+              /workspace/scripts/training/run_feedback_sft_qwen2_5vl_multinode.sh
 
             resources:
               requests:
@@ -108,7 +108,7 @@ spec:
                   key: token
                   optional: true
 
-            # Cache directories (from scripts/env.sh)
+            # Cache directories (from scripts/training/env.sh)
             - name: HF_HOME
               value: "/cache/hf"
             - name: TRANSFORMERS_CACHE
@@ -299,7 +299,7 @@ spec:
               # Start training
               echo "Starting multi-node feedback SFT training..."
               echo ""
-              /workspace/scripts/run_feedback_sft_qwen2_5vl_multinode.sh
+              /workspace/scripts/training/run_feedback_sft_qwen2_5vl_multinode.sh
 
             resources:
               requests:
@@ -328,7 +328,7 @@ spec:
                   key: token
                   optional: true
 
-            # Cache directories (from scripts/env.sh)
+            # Cache directories (from scripts/training/env.sh)
             - name: HF_HOME
               value: "/cache/hf"
             - name: TRANSFORMERS_CACHE

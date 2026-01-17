@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-# Multi-Node Feedback SFT Training Script for Qwen2.5-VL-7B on FIRE Dataset
+# Multi-Node Full Fine-Tuning Script for Qwen2.5-VL-7B on FIRE Dataset
 #
-# This script trains the model to generate FEEDBACK (teacher responses)
-# instead of student answers. Uses messages format with per-message loss control.
-# Distributed training across multiple nodes.
+# This script performs FULL parameter fine-tuning (not LoRA) on the
+# FIRE behavior cloning dataset using distributed training across multiple nodes.
 #
-# Hardware: 4 nodes × 2 A100 80GB = 8 GPUs total (multi-node DDP, uniform configuration)
+# Hardware: 2 nodes × 4 A100 80GB = 8 GPUs total (multi-node DDP)
 # Model: Qwen/Qwen2.5-VL-7B-Instruct with full parameter updates
 #
 # Environment variables set by PyTorchJob:
@@ -18,14 +17,14 @@
 set -euo pipefail
 
 # Source environment configuration
-source /workspace/scripts/env.sh
+source /workspace/scripts/training/env.sh
 
 # ============================================
 # Multi-Node Configuration
 # ============================================
 # These can be set by PyTorchJob or overridden via environment
-NNODES="${NNODES:-4}"
-NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
+NNODES="${NNODES:-2}"
+NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
 NODE_RANK="${NODE_RANK:-0}"
 
 # PyTorchJob sets these automatically
@@ -47,8 +46,8 @@ MODEL_ID="${MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct}"
 # ============================================
 # Dataset Configuration
 # ============================================
-DATASET_PATH="${DATASET_PATH:-/outputs/fire_feedback/fire_feedback_train.jsonl}"
-VAL_DATASET_PATH="${VAL_DATASET_PATH:-/outputs/fire_feedback/fire_feedback_test.jsonl}"
+DATASET_PATH="${DATASET_PATH:-/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl}"
+VAL_DATASET_PATH="${VAL_DATASET_PATH:-/outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl}"
 
 # ============================================
 # Sequence and Vision Configuration
@@ -72,10 +71,7 @@ LR="${LR:-5e-6}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.03}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
-
-# Loss scale: 'default' allows per-message loss field to take priority
-# Messages with loss: false will be excluded, loss: true will be included
-LOSS_SCALE="${LOSS_SCALE:-default}"
+LOSS_SCALE="${LOSS_SCALE:-last_round}"
 
 # Total GPUs across all nodes
 TOTAL_GPUS=$((NNODES * NPROC_PER_NODE))
@@ -83,7 +79,7 @@ TOTAL_GPUS=$((NNODES * NPROC_PER_NODE))
 # ============================================
 # Output Configuration
 # ============================================
-RUN_NAME="${RUN_NAME:-qwen2_5vl-7b-fire-feedback-sft-multinode}"
+RUN_NAME="${RUN_NAME:-qwen2_5vl-7b-fire-full-sft-multinode}"
 OUTPUT_PATH="${OUTPUT_DIR}/${RUN_NAME}"
 
 # ============================================
@@ -124,8 +120,8 @@ mkdir -p "${OUTPUT_PATH}"
 # Training Configuration Summary
 # ============================================
 echo "========================================="
-echo "FIRE Multi-Node Feedback SFT Training"
-echo "Training to generate FEEDBACK (not answers)"
+echo "FIRE Multi-Node Full Fine-Tuning"
+echo "Full Parameter Update (Not LoRA)"
 echo "========================================="
 echo ""
 echo "Multi-Node Configuration:"
@@ -144,12 +140,6 @@ echo ""
 echo "Dataset Configuration:"
 echo "  Train: ${DATASET_PATH}"
 echo "  Val: ${VAL_DATASET_PATH}"
-echo "  Format: Messages with per-message loss control"
-echo ""
-echo "Loss Configuration:"
-echo "  Loss Scale: ${LOSS_SCALE}"
-echo "  Question (first assistant): loss=false"
-echo "  Feedback (subsequent assistant): loss=true"
 echo ""
 echo "Sequence Configuration:"
 echo "  Max Length: ${MAX_LEN}"
@@ -200,7 +190,7 @@ swift sft \
     --save_steps "${SAVE_STEPS}" \
     --save_total_limit "${SAVE_TOTAL_LIMIT}" \
     --use_hf true \
-    --gradient_checkpointing true \
+    --gradient_checkpointing false \
     --freeze_vit true \
     --freeze_aligner true \
     --dataloader_num_workers 8 \
@@ -217,14 +207,10 @@ swift sft \
 
 echo ""
 echo "========================================="
-echo "Feedback SFT Training completed successfully!"
+echo "Training completed successfully!"
 echo "========================================="
 echo "Model saved to: ${OUTPUT_PATH}"
 echo ""
 echo "To use the model for inference:"
 echo "  swift infer --model_dir ${OUTPUT_PATH}"
-echo ""
-echo "Example inference (feedback generation):"
-echo "  Input: Question + image + student response"
-echo "  Output: Constructive feedback"
 echo "========================================="

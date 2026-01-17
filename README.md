@@ -27,17 +27,24 @@ vlm-self-reflection/
 ├── DOCKER_BUILD.md                     # Docker build system guide
 ├── GHCR_SETUP.md                       # GitHub Container Registry setup
 ├── scripts/
-│   ├── env.sh                         # Environment configuration
-│   ├── run_sft_ddp.sh                 # 2-GPU DDP training
-│   ├── run_sft_single_gpu.sh          # Single-GPU training (dev/test)
-│   ├── run_full_sft_qwen3vl_fire_8gpu.sh # 8-GPU full fine-tuning
-│   ├── prepare_fire_sharegpt.py       # FIRE dataset preprocessing
-│   ├── prepare_volcano_sharegpt.py    # Volcano dataset preprocessing
-│   ├── build_fire_image_mapping.py    # FIRE image mapping builder
-│   ├── build_local_image_mapping.py   # Local image mapping
-│   ├── merge_mappings.py              # Merge image mappings
-│   ├── analyze_dataset_lengths.py     # Dataset analysis
-│   └── test_fire_preprocessing.sh     # Local preprocessing test
+│   ├── training/                      # Training bash scripts
+│   │   ├── env.sh                     # Environment configuration
+│   │   ├── run_sft_ddp.sh             # 2-GPU DDP training
+│   │   ├── run_sft_single_gpu.sh      # Single-GPU training (dev/test)
+│   │   └── run_full_sft_qwen3vl_fire_8gpu.sh # 8-GPU full fine-tuning
+│   ├── data_prep/                     # Data preprocessing scripts
+│   │   ├── prepare_fire_sharegpt.py   # FIRE dataset preprocessing
+│   │   ├── prepare_volcano_sharegpt.py # Volcano dataset preprocessing
+│   │   ├── build_fire_image_mapping.py # FIRE image mapping builder
+│   │   ├── build_local_image_mapping.py # Local image mapping
+│   │   ├── merge_mappings.py          # Merge image mappings
+│   │   ├── analyze_dataset_lengths.py # Dataset analysis
+│   │   └── test_fire_preprocessing.sh # Local preprocessing test
+│   └── evaluation/                    # Evaluation pipeline scripts
+│       ├── evaluate_self_refinement.py # Main evaluation script
+│       ├── score_with_reward_model.py # Reward model scoring
+│       ├── vlm_judge.py               # VLM judge interface
+│       └── analyze_refinement_metrics.py # Results analysis
 ├── k8s/
 │   ├── pvc-cache.yaml                 # Cache storage (500Gi)
 │   ├── pvc-outputs.yaml               # Output storage (500Gi)
@@ -373,10 +380,10 @@ Test the preprocessing logic locally without downloading COCO images:
 
 ```bash
 # Test with 10 samples (uses placeholder image paths)
-./scripts/test_fire_preprocessing.sh
+./scripts/data_prep/test_fire_preprocessing.sh
 
 # Or run directly with --skip-images flag
-python scripts/prepare_fire_full_state_jsonl.py \
+python scripts/data_prep/prepare_fire_full_state_jsonl.py \
   --output_dir ./test_outputs \
   --image_dir ./test_images \
   --max_samples 10 \
@@ -521,10 +528,10 @@ Test dataset preprocessing locally before running on cluster:
 
 ```bash
 # Test FIRE preprocessing with 10 samples (no image download)
-./scripts/test_fire_preprocessing.sh
+./scripts/data_prep/test_fire_preprocessing.sh
 
 # Or manually with custom parameters
-python scripts/prepare_fire_sharegpt.py \
+python scripts/data_prep/prepare_fire_sharegpt.py \
   --output_dir ./test_fire_local/outputs \
   --image_dir ./test_fire_local/images \
   --max_samples 10 \
@@ -549,9 +556,9 @@ jupyter lab notebooks/dataset_analysis.ipynb
 For local development or testing on single GPU:
 
 ```bash
-# Edit scripts/run_sft_single_gpu.sh to customize parameters
+# Edit scripts/training/run_sft_single_gpu.sh to customize parameters
 # Then run directly (not recommended for production)
-bash scripts/run_sft_single_gpu.sh
+bash scripts/training/run_sft_single_gpu.sh
 ```
 
 Or use the Jupyter pod for interactive testing:
@@ -582,7 +589,7 @@ This project also supports the Volcano dataset for VLM training:
 
 ```bash
 # Local test (10 samples, no images)
-python scripts/prepare_volcano_sharegpt.py \
+python scripts/data_prep/prepare_volcano_sharegpt.py \
   --output_dir ./test_volcano_local/outputs \
   --image_dir ./test_volcano_local/images \
   --max_samples 10 \

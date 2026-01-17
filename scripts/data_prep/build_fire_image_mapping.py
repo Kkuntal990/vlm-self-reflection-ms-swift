@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Build a mapping file from FIRE image paths to actual downloaded images.
@@ -6,85 +5,148 @@ This allows us to download datasets once and map FIRE paths flexibly.
 """
 
 import argparse
+import contextlib
 import json
 import logging
 import shutil
+from collections import defaultdict
 from pathlib import Path
+
 from datasets import load_dataset
 from tqdm import tqdm
-from collections import defaultdict
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 # Map FIRE dataset/split to HuggingFace dataset configuration
 DATASET_SPLIT_MAPPING = {
     # COCO variants
-    ("coco", "train2014"): {"hf_id": "detection-datasets/coco", "split": "train", "id_field": "image_id"},
-    ("coco", "train2017"): {"hf_id": "detection-datasets/coco", "split": "train", "id_field": "image_id"},
-    ("coco", "val2014"): {"hf_id": "detection-datasets/coco", "split": "val", "id_field": "image_id"},
-
+    ("coco", "train2014"): {
+        "hf_id": "detection-datasets/coco",
+        "split": "train",
+        "id_field": "image_id",
+    },
+    ("coco", "train2017"): {
+        "hf_id": "detection-datasets/coco",
+        "split": "train",
+        "id_field": "image_id",
+    },
+    ("coco", "val2014"): {
+        "hf_id": "detection-datasets/coco",
+        "split": "val",
+        "id_field": "image_id",
+    },
     # GQA
-    ("gqa", "images"): {"hf_id": "lmms-lab/GQA", "config": "train_all_images", "split": "train", "id_field": None},
-
+    ("gqa", "images"): {
+        "hf_id": "lmms-lab/GQA",
+        "config": "train_all_images",
+        "split": "train",
+        "id_field": None,
+    },
     # TextVQA
-    ("textvqa", "train_val_images"): {"hf_id": "lmms-lab/textvqa", "split": "train", "id_field": "image_id"},
-
+    ("textvqa", "train_val_images"): {
+        "hf_id": "lmms-lab/textvqa",
+        "split": "train",
+        "id_field": "image_id",
+    },
     # DocVQA - ID is composite: {ucsf_document_id}_{ucsf_document_page_no}
-    ("docvqa", "documents"): {"hf_id": "lmms-lab/DocVQA", "config": "DocVQA", "split": "validation", "id_field": "composite_docvqa"},
-
+    ("docvqa", "documents"): {
+        "hf_id": "lmms-lab/DocVQA",
+        "config": "DocVQA",
+        "split": "validation",
+        "id_field": "composite_docvqa",
+    },
     # ALLaVA
-    ("allava_vflan", "images"): {"hf_id": "FreedomIntelligence/ALLaVA-4V", "config": "allava_vflan", "split": "caption", "id_field": None},
-
+    ("allava_vflan", "images"): {
+        "hf_id": "FreedomIntelligence/ALLaVA-4V",
+        "config": "allava_vflan",
+        "split": "caption",
+        "id_field": None,
+    },
     # Visual Genome
-    ("vg", "VG_100K"): {"hf_id": "visual_genome", "config": "region_descriptions_v1.2.0", "split": "train", "id_field": "image_id"},
-    ("vg", "VG_100K_2"): {"hf_id": "visual_genome", "config": "region_descriptions_v1.2.0", "split": "train", "id_field": "image_id"},
-
+    ("vg", "VG_100K"): {
+        "hf_id": "visual_genome",
+        "config": "region_descriptions_v1.2.0",
+        "split": "train",
+        "id_field": "image_id",
+    },
+    ("vg", "VG_100K_2"): {
+        "hf_id": "visual_genome",
+        "config": "region_descriptions_v1.2.0",
+        "split": "train",
+        "id_field": "image_id",
+    },
     # OCR-VQA
-    ("ocr_vqa", "images"): {"hf_id": "howard-hou/OCR-VQA", "split": "train", "id_field": "image_id"},
-
+    ("ocr_vqa", "images"): {
+        "hf_id": "howard-hou/OCR-VQA",
+        "split": "train",
+        "id_field": "image_id",
+    },
     # ChartQA
     ("chartqa", "train"): {"hf_id": "ahmed-masry/ChartQA", "split": "train", "id_field": None},
     ("chartqa", "test"): {"hf_id": "ahmed-masry/ChartQA", "split": "test", "id_field": None},
-
     # MathVista
     ("mathvista", "images"): {"hf_id": "AI4Math/MathVista", "split": "testmini", "id_field": "pid"},
-
     # ScienceQA
-    ("scienceqa", "images"): {"hf_id": "derek-thomas/ScienceQA", "split": "train", "id_field": None},
-
+    ("scienceqa", "images"): {
+        "hf_id": "derek-thomas/ScienceQA",
+        "split": "train",
+        "id_field": None,
+    },
     # GeoQA+ - DISABLED: Dataset doesn't exist on Hub
     # ("geoqa+", "images"): {"hf_id": "AI4Math/GeoQA_Plus", "split": "train", "id_field": "problem"},
     # ("geoqa+", "test-images"): {"hf_id": "AI4Math/GeoQA_Plus", "split": "test", "id_field": "problem"},
-
     # SynthDog-EN
-    ("synthdog-en", "images"): {"hf_id": "naver-clova-ix/synthdog-en", "split": "train", "id_field": None},
-    ("synthdog-en", "test-images"): {"hf_id": "naver-clova-ix/synthdog-en", "split": "validation", "id_field": None},
-
+    ("synthdog-en", "images"): {
+        "hf_id": "naver-clova-ix/synthdog-en",
+        "split": "train",
+        "id_field": None,
+    },
+    ("synthdog-en", "test-images"): {
+        "hf_id": "naver-clova-ix/synthdog-en",
+        "split": "validation",
+        "id_field": None,
+    },
     # DVQA - Using DavidNguyen/DVQA (webdataset format with __key__ field)
     ("dvqa", "images"): {"hf_id": "DavidNguyen/DVQA", "split": "train", "id_field": "__key__"},
-
     # AI2D
     ("ai2d", "images"): {"hf_id": "lmms-lab/ai2d", "split": "test", "id_field": "image"},
-
     # MathVerse (multiple versions)
-    ("mathverse", "images_version_1-4"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
-    ("mathverse", "images_version_5"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
-    ("mathverse", "images_version_6"): {"hf_id": "AI4Math/MathVerse", "config": "testmini", "split": "testmini", "id_field": "problem"},
-
+    ("mathverse", "images_version_1-4"): {
+        "hf_id": "AI4Math/MathVerse",
+        "config": "testmini",
+        "split": "testmini",
+        "id_field": "problem",
+    },
+    ("mathverse", "images_version_5"): {
+        "hf_id": "AI4Math/MathVerse",
+        "config": "testmini",
+        "split": "testmini",
+        "id_field": "problem",
+    },
+    ("mathverse", "images_version_6"): {
+        "hf_id": "AI4Math/MathVerse",
+        "config": "testmini",
+        "split": "testmini",
+        "id_field": "problem",
+    },
     # SEED-Bench - Using data_id field which matches FIRE paths (341486_825594355.jpg)
-    ("seedbench", "SEED-Bench-image"): {"hf_id": "lmms-lab/SEED-Bench", "split": "test", "id_field": "data_id"},
-
+    ("seedbench", "SEED-Bench-image"): {
+        "hf_id": "lmms-lab/SEED-Bench",
+        "split": "test",
+        "id_field": "data_id",
+    },
     # SAM (Segment Anything) - DISABLED: Dataset doesn't exist on Hub
     # ("sam", "images"): {"hf_id": "facebook/segment-anything-1b", "split": "train", "id_field": None},
-
     # MMMU - Multi-config dataset (30 subjects), use "all_configs" marker for special handling
-    ("mmmu", "test-images"): {"hf_id": "MMMU/MMMU", "split": "validation", "id_field": "id", "all_configs": True},
-
+    ("mmmu", "test-images"): {
+        "hf_id": "MMMU/MMMU",
+        "split": "validation",
+        "id_field": "id",
+        "all_configs": True,
+    },
     # MME (multiple categories)
     ("mme", "landmark"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
     ("mme", "artwork"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
@@ -94,22 +156,24 @@ DATASET_SPLIT_MAPPING = {
     ("mme", "position"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
     ("mme", "existence"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
     ("mme", "OCR"): {"hf_id": "lmms-lab/MME", "split": "test", "id_field": None},
-
     # WikiArt - Re-enabled (should work now, was temporary timeout)
     ("wikiart", "images"): {"hf_id": "huggan/wikiart", "split": "train", "id_field": None},
-
     # Web-Landmark - DISABLED: Dataset doesn't exist on Hub
     # ("web-landmark", "images"): {"hf_id": "google-research-datasets/web-landmarks", "split": "train", "id_field": None},
-
     # Web-Celebrity - DISABLED: Dataset doesn't exist on Hub
     # ("web-celebrity", "images"): {"hf_id": "google-research-datasets/web-celebrity", "split": "train", "id_field": None},
-
     # ShareGPT4V TextVQA
-    ("share_textvqa", "images"): {"hf_id": "lmms-lab/textvqa", "split": "train", "id_field": "image_id"},
-
+    ("share_textvqa", "images"): {
+        "hf_id": "lmms-lab/textvqa",
+        "split": "train",
+        "id_field": "image_id",
+    },
     # LLaVA in the Wild - Using lmms-lab/llava-bench-in-the-wild
-    ("llava-in-the-wild", "images"): {"hf_id": "lmms-lab/llava-bench-in-the-wild", "split": "train", "id_field": "image_id"},
-
+    ("llava-in-the-wild", "images"): {
+        "hf_id": "lmms-lab/llava-bench-in-the-wild",
+        "split": "train",
+        "id_field": "image_id",
+    },
     # MM-Vet - Using lmms-lab/MMVet
     ("mm-vet", "images"): {"hf_id": "lmms-lab/MMVet", "split": "test", "id_field": "question_id"},
 }
@@ -136,7 +200,9 @@ def collect_fire_paths(fire_dataset_id: str, splits: list, max_samples: int = 0)
     return fire_paths
 
 
-def build_mapping_for_multiconfig_source(fire_paths: set, source: str, subfolder: str, config: dict, cache_dir: Path, relevant_paths: set):
+def build_mapping_for_multiconfig_source(
+    fire_paths: set, source: str, subfolder: str, config: dict, cache_dir: Path, relevant_paths: set
+):
     """
     Build mapping for datasets with multiple configs (like MMMU with 30 subject configs).
 
@@ -167,15 +233,15 @@ def build_mapping_for_multiconfig_source(fire_paths: set, source: str, subfolder
     config_to_paths = defaultdict(set)
     for fire_path in relevant_paths:
         # Parse: mmmu/test-images/validation_Geography_20.jpg -> config=Geography, id=validation_Geography_20
-        filename = fire_path.split('/')[-1]
-        img_id = filename.rsplit('.', 1)[0]  # validation_Geography_20
+        filename = fire_path.split("/")[-1]
+        img_id = filename.rsplit(".", 1)[0]  # validation_Geography_20
 
         # Extract config name from the id (format: validation_ConfigName_Number)
-        parts = img_id.split('_')
+        parts = img_id.split("_")
         if len(parts) >= 3:
             # Config name might have underscores, so we need to find the last number
             # validation_Diagnostics_and_Laboratory_Medicine_1 -> config = Diagnostics_and_Laboratory_Medicine
-            config_name = '_'.join(parts[1:-1])  # Everything between 'validation' and the number
+            config_name = "_".join(parts[1:-1])  # Everything between 'validation' and the number
             config_to_paths[config_name].add((fire_path, img_id))
 
     logger.info(f"Need {len(config_to_paths)} configs from FIRE paths")
@@ -189,7 +255,9 @@ def build_mapping_for_multiconfig_source(fire_paths: set, source: str, subfolder
             continue
 
         try:
-            ds = load_dataset(hf_id, config_name, split=split, cache_dir=str(cache_dir), trust_remote_code=True)
+            ds = load_dataset(
+                hf_id, config_name, split=split, cache_dir=str(cache_dir), trust_remote_code=True
+            )
         except Exception as e:
             logger.warning(f"Failed to load config {config_name}: {e}")
             continue
@@ -211,23 +279,25 @@ def build_mapping_for_multiconfig_source(fire_paths: set, source: str, subfolder
                     "split": split,
                     "index": idx,
                     "id_field": id_field,
-                    "id_value": img_id
+                    "id_value": img_id,
                 }
 
     logger.info(f"✓ Mapped {len(mapping)}/{len(relevant_paths)} paths for multi-config dataset")
     return mapping
 
 
-def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, config: dict, cache_dir: Path):
+def build_mapping_for_source(
+    fire_paths: set, source: str, subfolder: str, config: dict, cache_dir: Path
+):
     """
     Build mapping for a specific dataset/split combination.
 
     Returns:
         dict: {fire_path: actual_image_path}
     """
-    logger.info(f"=" * 60)
+    logger.info("=" * 60)
     logger.info(f"Building mapping for {source}/{subfolder}")
-    logger.info(f"=" * 60)
+    logger.info("=" * 60)
 
     hf_id = config["hf_id"]
     split = config["split"]
@@ -236,10 +306,7 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
     all_configs = config.get("all_configs", False)
 
     # Filter FIRE paths for this source/subfolder
-    relevant_paths = {
-        path for path in fire_paths
-        if path.startswith(f"{source}/{subfolder}/")
-    }
+    relevant_paths = {path for path in fire_paths if path.startswith(f"{source}/{subfolder}/")}
 
     if not relevant_paths:
         logger.info(f"No paths found for {source}/{subfolder}")
@@ -257,7 +324,9 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
     logger.info(f"Loading dataset: {hf_id} (split: {split})")
     try:
         if hf_config:
-            ds = load_dataset(hf_id, hf_config, split=split, cache_dir=str(cache_dir), trust_remote_code=True)
+            ds = load_dataset(
+                hf_id, hf_config, split=split, cache_dir=str(cache_dir), trust_remote_code=True
+            )
         else:
             ds = load_dataset(hf_id, split=split, cache_dir=str(cache_dir), trust_remote_code=True)
     except Exception as e:
@@ -294,15 +363,13 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
         # Map FIRE paths
         for fire_path in tqdm(relevant_paths, desc="Mapping paths"):
             # Extract image ID from FIRE path
-            filename = fire_path.split('/')[-1]
-            img_id = filename.rsplit('.', 1)[0]
+            filename = fire_path.split("/")[-1]
+            img_id = filename.rsplit(".", 1)[0]
 
             # For COCO, convert to int
             if source == "coco":
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     img_id = str(int(img_id))
-                except:
-                    pass
 
             # For DVQA, the __key__ field is like "images/bar_val_easy_00017109"
             # but FIRE path is "dvqa/images/bar_val_easy_00017109.png"
@@ -319,11 +386,13 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
                     "split": split,
                     "index": idx,
                     "id_field": id_field,
-                    "id_value": img_id
+                    "id_value": img_id,
                 }
     else:
         # No ID field - use sequential indexing (all paths map to dataset in order)
-        logger.info(f"No ID field - mapping {len(relevant_paths)} paths to {len(ds)} samples sequentially")
+        logger.info(
+            f"No ID field - mapping {len(relevant_paths)} paths to {len(ds)} samples sequentially"
+        )
 
         # For datasets without ID field, we assume FIRE paths are just dataset indices
         # Map each path to its sequential index in the dataset
@@ -335,7 +404,7 @@ def build_mapping_for_source(fire_paths: set, source: str, subfolder: str, confi
                     "split": split,
                     "index": idx,
                     "id_field": None,
-                    "id_value": None
+                    "id_value": None,
                 }
 
     logger.info(f"✓ Mapped {len(mapping)}/{len(relevant_paths)} paths")
@@ -350,12 +419,9 @@ def calculate_dataset_coverage(mapping: dict, fire_paths: set) -> dict:
     """
     coverage = {}
 
-    for (source, subfolder) in DATASET_SPLIT_MAPPING.keys():
+    for source, subfolder in DATASET_SPLIT_MAPPING:
         # Find all FIRE paths for this source/split
-        relevant_paths = {
-            path for path in fire_paths
-            if path.startswith(f"{source}/{subfolder}/")
-        }
+        relevant_paths = {path for path in fire_paths if path.startswith(f"{source}/{subfolder}/")}
 
         if not relevant_paths:
             continue
@@ -368,7 +434,7 @@ def calculate_dataset_coverage(mapping: dict, fire_paths: set) -> dict:
         coverage[(source, subfolder)] = {
             "mapped": mapped_count,
             "total": total_count,
-            "coverage": coverage_pct
+            "coverage": coverage_pct,
         }
 
     return coverage
@@ -438,20 +504,22 @@ def main():
 
     if args.existing_mapping:
         logger.info(f"Loading existing mapping from {args.existing_mapping}")
-        with open(args.existing_mapping, 'r') as f:
+        with open(args.existing_mapping) as f:
             existing_mapping = json.load(f)
 
         # Calculate coverage for each dataset
         coverage = calculate_dataset_coverage(existing_mapping, fire_paths)
 
-        logger.info(f"\nExisting mapping coverage (threshold: {args.min_coverage*100:.0f}%):")
+        logger.info(f"\nExisting mapping coverage (threshold: {args.min_coverage * 100:.0f}%):")
         logger.info("-" * 60)
 
         for (source, subfolder), stats in sorted(coverage.items()):
             cov_pct = stats["coverage"] * 100
             status = "✓ SKIP" if stats["coverage"] >= args.min_coverage else "✗ RETRY"
 
-            logger.info(f"{source:20s}/{subfolder:20s} {stats['mapped']:6d}/{stats['total']:6d} ({cov_pct:5.1f}%) {status}")
+            logger.info(
+                f"{source:20s}/{subfolder:20s} {stats['mapped']:6d}/{stats['total']:6d} ({cov_pct:5.1f}%) {status}"
+            )
 
             if stats["coverage"] >= args.min_coverage:
                 skip_datasets.add((source, subfolder))
@@ -466,7 +534,9 @@ def main():
 
     for (source, subfolder), config in DATASET_SPLIT_MAPPING.items():
         if (source, subfolder) in skip_datasets:
-            logger.info(f"⊘ Skipping {source}/{subfolder} (coverage >= {args.min_coverage*100:.0f}%)")
+            logger.info(
+                f"⊘ Skipping {source}/{subfolder} (coverage >= {args.min_coverage * 100:.0f}%)"
+            )
             continue
 
         datasets_processed += 1
@@ -485,7 +555,7 @@ def main():
             shutil.copy2(output_path, backup_path)
             logger.info(f"Backup saved ({output_path.stat().st_size / 1024 / 1024:.1f} MB)")
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         json.dump(full_mapping, f, indent=2)
 
     logger.info("=" * 60)
@@ -495,7 +565,7 @@ def main():
     logger.info(f"Datasets skipped: {len(skip_datasets)}")
     logger.info(f"Total paths mapped: {len(full_mapping)}")
     logger.info(f"Total paths in FIRE: {len(fire_paths)}")
-    logger.info(f"Coverage: {len(full_mapping)/len(fire_paths)*100:.1f}%")
+    logger.info(f"Coverage: {len(full_mapping) / len(fire_paths) * 100:.1f}%")
     logger.info(f"Mapping saved to: {output_path}")
 
     # Mention backup if created

@@ -18,11 +18,10 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 from huggingface_hub import hf_hub_download
-from PIL import Image
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,7 +95,7 @@ def parse_volcano_to_sharegpt(
     sample_id: str,
     image_path: str,
     system_prompt: str,
-) -> Optional[dict]:
+) -> dict | None:
     """Convert a Volcano sample to ShareGPT format.
 
     Expected Volcano format (adjust based on actual structure):
@@ -136,10 +135,9 @@ def parse_volcano_to_sharegpt(
                     assistant_text = assistant_turn.get("value", "")
 
                     if human_text and assistant_text:
-                        sharegpt_conversation.append({
-                            "human": human_text,
-                            "assistant": assistant_text
-                        })
+                        sharegpt_conversation.append(
+                            {"human": human_text, "assistant": assistant_text}
+                        )
                     i += 2
                 else:
                     i += 1
@@ -153,7 +151,7 @@ def parse_volcano_to_sharegpt(
         return {
             "system": system_prompt,
             "conversation": sharegpt_conversation,
-            "images": [image_path]
+            "images": [image_path],
         }
 
     except Exception as e:
@@ -168,8 +166,8 @@ def load_volcano_data(args) -> list:
     if args.input_file and os.path.exists(args.input_file):
         # Load from local file
         logger.info(f"Loading from local file: {args.input_file}")
-        with open(args.input_file, 'r', encoding='utf-8') as f:
-            if args.input_file.endswith('.jsonl'):
+        with open(args.input_file, encoding="utf-8") as f:
+            if args.input_file.endswith(".jsonl"):
                 for line in f:
                     samples.append(json.loads(line))
             else:
@@ -179,12 +177,10 @@ def load_volcano_data(args) -> list:
         # Download from HuggingFace
         logger.info(f"Downloading from {args.repo_id}/{args.data_file}")
         local_file = hf_hub_download(
-            repo_id=args.repo_id,
-            filename=args.data_file,
-            repo_type="dataset"
+            repo_id=args.repo_id, filename=args.data_file, repo_type="dataset"
         )
 
-        with open(local_file, 'r', encoding='utf-8') as f:
+        with open(local_file, encoding="utf-8") as f:
             # Try both JSON and JSONL
             try:
                 data = json.load(f)
@@ -220,14 +216,14 @@ def main():
     samples = load_volcano_data(args)
 
     if args.max_samples > 0:
-        samples = samples[:args.max_samples]
+        samples = samples[: args.max_samples]
 
     # Process samples
     output_file = output_dir / "volcano_sharegpt_train.jsonl"
     processed = 0
     skipped = 0
 
-    with open(output_file, 'w', encoding='utf-8') as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         for idx, sample in enumerate(tqdm(samples, desc="Processing")):
             sample_id = f"volcano_{idx:06d}"
 
@@ -239,7 +235,7 @@ def main():
                     # TODO: Download actual images if available in dataset
                     image_path = str(image_dir / f"{sample_id}.jpg")
                     # For now, use placeholder
-                    logger.warning(f"Image download not implemented, using placeholder")
+                    logger.warning("Image download not implemented, using placeholder")
 
                 # Convert to ShareGPT
                 sharegpt_sample = parse_volcano_to_sharegpt(

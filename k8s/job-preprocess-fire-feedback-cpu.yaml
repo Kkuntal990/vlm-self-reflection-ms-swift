@@ -54,7 +54,7 @@ spec:
           # Uses lazy loading for memory efficiency
 
           echo "Processing TRAIN and TEST splits with complete mapping..."
-          python /workspace/scripts/prepare_fire_feedback_sft.py \
+          python /workspace/scripts/data_prep/prepare_fire_feedback_sft.py \
             --dataset_id "${DATASET_ID}" \
             --output_dir /outputs/fire_feedback \
             --image_dir /outputs/fire_feedback_images \

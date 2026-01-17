@@ -9,16 +9,15 @@ This script:
 4. Recommends optimal max_length values
 """
 
-import json
 import argparse
+import json
 from pathlib import Path
-from typing import List, Dict
+
 import numpy as np
-from collections import defaultdict
 from transformers import AutoTokenizer
 
 
-def count_images_in_conversation(messages: List[Dict]) -> int:
+def count_images_in_conversation(messages: list[dict]) -> int:
     """Count number of images in a conversation."""
     image_count = 0
     for msg in messages:
@@ -35,10 +34,8 @@ def count_images_in_conversation(messages: List[Dict]) -> int:
 
 
 def estimate_conversation_tokens(
-    messages: List[Dict],
-    tokenizer,
-    image_token_count: int = 2048
-) -> Dict:
+    messages: list[dict], tokenizer, image_token_count: int = 2048
+) -> dict:
     """
     Estimate total tokens for a conversation.
 
@@ -87,7 +84,7 @@ def estimate_conversation_tokens(
         "text_tokens": text_tokens,
         "image_tokens": image_tokens,
         "image_count": image_count,
-        "total_tokens": text_tokens + image_tokens
+        "total_tokens": text_tokens + image_tokens,
     }
 
 
@@ -95,7 +92,7 @@ def analyze_dataset(
     dataset_path: Path,
     model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct",
     image_token_count: int = 2048,
-    max_samples: int = None
+    max_samples: int = None,
 ):
     """Analyze token distribution in dataset."""
 
@@ -109,7 +106,7 @@ def analyze_dataset(
     text_token_stats = []
     image_count_stats = []
 
-    with open(dataset_path, 'r') as f:
+    with open(dataset_path) as f:
         for idx, line in enumerate(f):
             if max_samples and idx >= max_samples:
                 break
@@ -117,18 +114,14 @@ def analyze_dataset(
             data = json.loads(line)
             messages = data.get("messages", data.get("conversations", []))
 
-            stats = estimate_conversation_tokens(
-                messages,
-                tokenizer,
-                image_token_count
-            )
+            stats = estimate_conversation_tokens(messages, tokenizer, image_token_count)
 
             token_stats.append(stats["total_tokens"])
             text_token_stats.append(stats["text_tokens"])
             image_count_stats.append(stats["image_count"])
 
             if (idx + 1) % 100 == 0:
-                print(f"Processed {idx + 1} samples...", end='\r')
+                print(f"Processed {idx + 1} samples...", end="\r")
 
     print(f"\nProcessed {len(token_stats)} samples total")
     print("=" * 60)
@@ -140,28 +133,30 @@ def analyze_dataset(
 
     print("\n📊 TOKEN LENGTH DISTRIBUTION")
     print("=" * 60)
-    print(f"Total Tokens (text + images):")
+    print("Total Tokens (text + images):")
     print(f"  Mean:       {token_array.mean():.1f}")
     print(f"  Median:     {np.median(token_array):.1f}")
     print(f"  Std Dev:    {token_array.std():.1f}")
     print(f"  Min:        {token_array.min():.1f}")
     print(f"  Max:        {token_array.max():.1f}")
     print()
-    print(f"Percentiles:")
+    print("Percentiles:")
     for p in [50, 75, 90, 95, 99]:
         val = np.percentile(token_array, p)
         pct_kept = (token_array <= val).sum() / len(token_array) * 100
         print(f"  {p}th:       {val:.1f} tokens ({pct_kept:.1f}% of samples fit)")
 
-    print(f"\n📝 TEXT TOKENS (excluding images):")
+    print("\n📝 TEXT TOKENS (excluding images):")
     print(f"  Mean:       {text_array.mean():.1f}")
     print(f"  Median:     {np.median(text_array):.1f}")
     print(f"  Max:        {text_array.max():.1f}")
 
-    print(f"\n🖼️  IMAGE STATISTICS:")
+    print("\n🖼️  IMAGE STATISTICS:")
     print(f"  Images per sample (mean):  {image_array.mean():.2f}")
     print(f"  Images per sample (max):   {image_array.max():.0f}")
-    print(f"  Samples with images:       {(image_array > 0).sum()} ({(image_array > 0).sum() / len(image_array) * 100:.1f}%)")
+    print(
+        f"  Samples with images:       {(image_array > 0).sum()} ({(image_array > 0).sum() / len(image_array) * 100:.1f}%)"
+    )
     print(f"  Image token count used:    {image_token_count}")
 
     # Recommendations
@@ -185,7 +180,7 @@ def analyze_dataset(
         print(f"\nmax_length = {max_len}")
         print(f"  {desc}")
         print(f"  Samples that fit: {fit_count}/{len(token_array)} ({fit_pct:.1f}%)")
-        print(f"  Samples truncated: {truncated} ({100-fit_pct:.1f}%)")
+        print(f"  Samples truncated: {truncated} ({100 - fit_pct:.1f}%)")
         print(f"  Memory usage: ~{memory_factor:.1f}x compared to 8192")
 
     # Data loss analysis
@@ -210,40 +205,36 @@ def analyze_dataset(
     fit_pct = (token_array <= recommended).sum() / len(token_array) * 100
     print(f"Start with max_length={recommended}")
     print(f"  - Fits {fit_pct:.1f}% of your data")
-    print(f"  - Good balance of coverage and memory efficiency")
-    print(f"  - Monitor training logs for truncation warnings")
+    print("  - Good balance of coverage and memory efficiency")
+    print("  - Monitor training logs for truncation warnings")
     print()
     print("To increase coverage, raise max_length in the job YAML:")
-    print(f"  k8s/job-full-sft-qwen3vl-fire-8gpu.yaml → MAX_LEN")
+    print("  k8s/job-full-sft-qwen3vl-fire-8gpu.yaml → MAX_LEN")
     print()
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Analyze token lengths in FIRE ShareGPT dataset"
-    )
+    parser = argparse.ArgumentParser(description="Analyze token lengths in FIRE ShareGPT dataset")
     parser.add_argument(
         "--dataset",
         type=Path,
         default=Path("/outputs/fire_sharegpt/fire_sharegpt_test.jsonl"),
-        help="Path to ShareGPT JSONL file"
+        help="Path to ShareGPT JSONL file",
     )
     parser.add_argument(
-        "--model",
-        default="Qwen/Qwen2.5-VL-7B-Instruct",
-        help="Model ID for tokenizer"
+        "--model", default="Qwen/Qwen2.5-VL-7B-Instruct", help="Model ID for tokenizer"
     )
     parser.add_argument(
         "--image-tokens",
         type=int,
         default=2048,
-        help="Number of tokens per image (Qwen2.5-VL default: 2048)"
+        help="Number of tokens per image (Qwen2.5-VL default: 2048)",
     )
     parser.add_argument(
         "--max-samples",
         type=int,
         default=None,
-        help="Limit analysis to N samples (for quick testing)"
+        help="Limit analysis to N samples (for quick testing)",
     )
 
     args = parser.parse_args()
@@ -254,12 +245,7 @@ def main():
         print("  python scripts/prepare_fire_sharegpt.py --max_samples 100 --skip-images")
         return
 
-    analyze_dataset(
-        args.dataset,
-        args.model,
-        args.image_tokens,
-        args.max_samples
-    )
+    analyze_dataset(args.dataset, args.model, args.image_tokens, args.max_samples)
 
 
 if __name__ == "__main__":

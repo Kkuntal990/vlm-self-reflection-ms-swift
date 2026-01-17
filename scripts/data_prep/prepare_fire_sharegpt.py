@@ -43,7 +43,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Union
+
 
 # Set HuggingFace timeouts to avoid network issues
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")  # 10 minutes for downloads
@@ -52,6 +52,7 @@ os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")  # 1 minute for metadata chec
 from datasets import load_dataset
 from PIL import Image
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -143,7 +144,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def save_image(image: Union[Image.Image, str, bytes, dict], path: str, quality: int = 95) -> bool:
+def save_image(image: Image.Image | str | bytes | dict, path: str, quality: int = 95) -> bool:
     """Save image to disk as JPEG, handling multiple input formats.
 
     Args:
@@ -160,12 +161,12 @@ def save_image(image: Union[Image.Image, str, bytes, dict], path: str, quality: 
             pil_image = image
         elif isinstance(image, str):
             # Could be file path, URL, or base64
-            if image.startswith('data:image'):
+            if image.startswith("data:image"):
                 # Base64 with data URI prefix
-                base64_data = image.split(',', 1)[1]
+                base64_data = image.split(",", 1)[1]
                 image_bytes = base64.b64decode(base64_data)
                 pil_image = Image.open(io.BytesIO(image_bytes))
-            elif image.startswith('http://') or image.startswith('https://'):
+            elif image.startswith("http://") or image.startswith("https://"):
                 # URL - would need requests library
                 logger.warning(f"Image URLs not supported yet: {image[:50]}")
                 return False
@@ -185,10 +186,10 @@ def save_image(image: Union[Image.Image, str, bytes, dict], path: str, quality: 
             pil_image = Image.open(io.BytesIO(image))
         elif isinstance(image, dict):
             # HuggingFace datasets sometimes use dict format
-            if 'path' in image:
-                pil_image = Image.open(image['path'])
-            elif 'bytes' in image:
-                pil_image = Image.open(io.BytesIO(image['bytes']))
+            if "path" in image:
+                pil_image = Image.open(image["path"])
+            elif "bytes" in image:
+                pil_image = Image.open(io.BytesIO(image["bytes"]))
             else:
                 logger.warning(f"Unknown dict image format: {list(image.keys())}")
                 return False
@@ -278,7 +279,7 @@ class LazyImageLoader:
             cache_dir: HuggingFace cache directory
         """
         logger.info(f"Loading mapping from {mapping_file}")
-        with open(mapping_file, 'r') as f:
+        with open(mapping_file) as f:
             self.mapping = json.load(f)
 
         self.cache_dir = cache_dir
@@ -306,6 +307,7 @@ class LazyImageLoader:
         if "local_path" in entry:
             try:
                 from PIL import Image
+
                 local_path = entry["local_path"]
                 self.stats["hits"] += 1
                 return Image.open(local_path)
@@ -328,9 +330,17 @@ class LazyImageLoader:
             try:
                 logger.info(f"Loading dataset: {dataset_id} ({split})")
                 if config:
-                    ds = load_dataset(dataset_id, config, split=split, cache_dir=self.cache_dir, trust_remote_code=True)
+                    ds = load_dataset(
+                        dataset_id,
+                        config,
+                        split=split,
+                        cache_dir=self.cache_dir,
+                        trust_remote_code=True,
+                    )
                 else:
-                    ds = load_dataset(dataset_id, split=split, cache_dir=self.cache_dir, trust_remote_code=True)
+                    ds = load_dataset(
+                        dataset_id, split=split, cache_dir=self.cache_dir, trust_remote_code=True
+                    )
                 self.dataset_cache[cache_key] = ds
                 logger.info(f"Dataset cached: {dataset_id} ({len(ds)} samples)")
             except Exception as e:
@@ -341,9 +351,9 @@ class LazyImageLoader:
         # Get image from cached dataset
         try:
             ds = self.dataset_cache[cache_key]
-            if index < len(ds) and 'image' in ds[index]:
+            if index < len(ds) and "image" in ds[index]:
                 self.stats["hits"] += 1
-                return ds[index]['image']
+                return ds[index]["image"]
             else:
                 self.stats["misses"] += 1
                 return None
@@ -360,8 +370,8 @@ class LazyImageLoader:
             "hits": self.stats["hits"],
             "misses": self.stats["misses"],
             "errors": self.stats["errors"],
-            "hit_rate": f"{self.stats['hits']/total*100:.1f}%" if total > 0 else "0%",
-            "datasets_cached": len(self.dataset_cache)
+            "hit_rate": f"{self.stats['hits'] / total * 100:.1f}%" if total > 0 else "0%",
+            "datasets_cached": len(self.dataset_cache),
         }
 
 
@@ -475,10 +485,7 @@ def parse_fire_to_sharegpt(
                 feedback = None
                 if i + 1 < len(conversations):
                     next_turn = conversations[i + 1]
-                    if (
-                        next_turn.get("role") == "teacher"
-                        and next_turn.get("type") == "feedback"
-                    ):
+                    if next_turn.get("role") == "teacher" and next_turn.get("type") == "feedback":
                         feedback_value = next_turn.get("value", "")
                         feedback = extract_feedback_text(feedback_value)
                         i += 1  # Skip the feedback turn
@@ -495,10 +502,7 @@ def parse_fire_to_sharegpt(
     conversation = []
 
     # First exchange: question -> first answer
-    conversation.append({
-        "human": question_text,
-        "assistant": rounds[0][0]
-    })
+    conversation.append({"human": question_text, "assistant": rounds[0][0]})
 
     # Subsequent exchanges: feedback -> next answer
     for i in range(1, len(rounds)):
@@ -506,17 +510,10 @@ def parse_fire_to_sharegpt(
         current_answer = rounds[i][0]
 
         if prev_feedback:  # Only add if there was feedback
-            conversation.append({
-                "human": prev_feedback,
-                "assistant": current_answer
-            })
+            conversation.append({"human": prev_feedback, "assistant": current_answer})
 
     # Return ShareGPT format with system prompt and images field
-    return {
-        "system": system_prompt,
-        "conversation": conversation,
-        "images": [image_path]
-    }
+    return {"system": system_prompt, "conversation": conversation, "images": [image_path]}
 
 
 def process_split(
@@ -564,13 +561,13 @@ def process_split(
     dataset = load_dataset(dataset_id, split=split, streaming=streaming)
 
     # First pass: collect image paths we need
-    logger.info(f"Collecting needed image paths from FIRE...")
+    logger.info("Collecting needed image paths from FIRE...")
     if streaming:
         if max_samples > 0:
             fire_samples = list(dataset.take(max_samples))
         else:
             # Take all samples - streaming datasets don't have len() so we iterate fully
-            logger.info(f"Loading all samples from streaming dataset (this may take time)...")
+            logger.info("Loading all samples from streaming dataset (this may take time)...")
             fire_samples = list(dataset)
     else:
         if max_samples > 0:
@@ -585,11 +582,10 @@ def process_split(
             # Apply source filter if specified
             if filter_sources:
                 # Check if image path starts with any of the filter sources
-                source = img_path.split('/')[0]
+                source = img_path.split("/")[0]
                 if source not in filter_sources:
                     continue
             needed_image_paths.add(img_path)
-
 
     # Initialize stats
     stats = {
@@ -605,7 +601,7 @@ def process_split(
         # Round-based breakdown
         "rounds_breakdown": {
             "processed": {},  # {num_rounds: count}
-            "skipped": {}     # {num_rounds: count}
+            "skipped": {},  # {num_rounds: count}
         },
     }
 
@@ -629,7 +625,9 @@ def process_split(
     else:
         logger.error("No image source specified!")
         logger.error("Use one of: --source_images_dir, --mapping_file, or --skip-images")
-        raise ValueError("Must specify image source: --source_images_dir, --mapping_file, or --skip-images")
+        raise ValueError(
+            "Must specify image source: --source_images_dir, --mapping_file, or --skip-images"
+        )
 
     output_file = output_dir / f"fire_sharegpt_{split}.jsonl"
 
@@ -654,19 +652,23 @@ def process_split(
                     stats["samples_skipped"] += 1
                     stats["samples_no_image"] += 1
                     # Track rounds for skipped samples
-                    stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                    stats["rounds_breakdown"]["skipped"][num_rounds] = (
+                        stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                    )
                     if len(stats["errors"]) < 100:
                         stats["errors"].append(f"{sample_id}: No image path")
                     continue
 
                 # Apply source filter if specified
                 if filter_sources:
-                    source = image_path_ref.split('/')[0]
+                    source = image_path_ref.split("/")[0]
                     if source not in filter_sources:
                         stats["samples_skipped"] += 1
                         stats["samples_filtered_by_source"] += 1
                         # Track rounds for skipped samples
-                        stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                        stats["rounds_breakdown"]["skipped"][num_rounds] = (
+                            stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                        )
                         continue
 
                 # Get image for this sample
@@ -681,7 +683,7 @@ def process_split(
                         image = lazy_loader.get(image_path_ref)
 
                         # Try alternative path formats if not found
-                        if image is None and image_path_ref.startswith('images/'):
+                        if image is None and image_path_ref.startswith("images/"):
                             alt_path = f"mathvista/{image_path_ref}"
                             image = lazy_loader.get(alt_path)
                             if image is not None:
@@ -691,7 +693,7 @@ def process_split(
                         image = source_images.get(image_path_ref)
 
                         # Try alternative path formats if not found
-                        if image is None and image_path_ref.startswith('images/'):
+                        if image is None and image_path_ref.startswith("images/"):
                             alt_path = f"mathvista/{image_path_ref}"
                             image = source_images.get(alt_path)
                             if image is not None:
@@ -701,9 +703,13 @@ def process_split(
                         stats["samples_skipped"] += 1
                         stats["samples_no_image"] += 1
                         # Track rounds for skipped samples
-                        stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                        stats["rounds_breakdown"]["skipped"][num_rounds] = (
+                            stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                        )
                         if len(stats["errors"]) < 100:
-                            stats["errors"].append(f"{sample_id}: Image not found: {image_path_ref}")
+                            stats["errors"].append(
+                                f"{sample_id}: Image not found: {image_path_ref}"
+                            )
                         continue
 
                     # Handle based on image type
@@ -717,7 +723,9 @@ def process_split(
                         if not save_image(image, image_save_path, image_quality):
                             stats["samples_skipped"] += 1
                             # Track rounds for skipped samples
-                            stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                            stats["rounds_breakdown"]["skipped"][num_rounds] = (
+                                stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                            )
                             if len(stats["errors"]) < 100:
                                 stats["errors"].append(f"{sample_id}: Image save failed")
                             continue
@@ -732,7 +740,9 @@ def process_split(
                     stats["samples_skipped"] += 1
                     stats["samples_no_conversations"] += 1
                     # Track rounds for skipped samples
-                    stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                    stats["rounds_breakdown"]["skipped"][num_rounds] = (
+                        stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                    )
                     if len(stats["errors"]) < 100:
                         stats["errors"].append(f"{sample_id}: No valid conversations")
                     continue
@@ -744,16 +754,20 @@ def process_split(
                 # Count conversation rounds
                 stats["total_rounds"] += len(sharegpt_example["conversation"])
                 # Track rounds for processed samples
-                stats["rounds_breakdown"]["processed"][num_rounds] = stats["rounds_breakdown"]["processed"].get(num_rounds, 0) + 1
+                stats["rounds_breakdown"]["processed"][num_rounds] = (
+                    stats["rounds_breakdown"]["processed"].get(num_rounds, 0) + 1
+                )
 
             except Exception as e:
                 stats["samples_skipped"] += 1
                 # Track rounds for skipped samples (use num_rounds if available, else 0)
                 try:
                     num_rounds = count_rounds_in_sample(sample)
-                except:
+                except Exception:
                     num_rounds = 0
-                stats["rounds_breakdown"]["skipped"][num_rounds] = stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                stats["rounds_breakdown"]["skipped"][num_rounds] = (
+                    stats["rounds_breakdown"]["skipped"].get(num_rounds, 0) + 1
+                )
                 if len(stats["errors"]) < 100:
                     stats["errors"].append(f"{sample_id}: {str(e)}")
                 logger.warning(f"Error processing sample {idx}: {e}")
@@ -832,9 +846,7 @@ def main():
     total_rounds = 0
 
     for split, stats in all_stats.items():
-        avg_rounds = (
-            stats["total_rounds"] / max(1, stats["samples_processed"])
-        )
+        avg_rounds = stats["total_rounds"] / max(1, stats["samples_processed"])
         logger.info(f"\n{split.upper()} SPLIT:")
         logger.info(f"  Samples processed: {stats['samples_processed']}")
         logger.info(f"  Samples skipped: {stats['samples_skipped']}")
@@ -846,23 +858,23 @@ def main():
         logger.info(f"  Images saved: {stats['images_saved']}")
 
         # Round-based breakdown
-        logger.info(f"\n  Rounds Breakdown (Processed):")
+        logger.info("\n  Rounds Breakdown (Processed):")
         processed_breakdown = stats.get("rounds_breakdown", {}).get("processed", {})
         if processed_breakdown:
             for num_rounds in sorted(processed_breakdown.keys()):
                 count = processed_breakdown[num_rounds]
                 logger.info(f"    {num_rounds} round(s): {count} samples")
         else:
-            logger.info(f"    No samples processed")
+            logger.info("    No samples processed")
 
-        logger.info(f"\n  Rounds Breakdown (Skipped):")
+        logger.info("\n  Rounds Breakdown (Skipped):")
         skipped_breakdown = stats.get("rounds_breakdown", {}).get("skipped", {})
         if skipped_breakdown:
             for num_rounds in sorted(skipped_breakdown.keys()):
                 count = skipped_breakdown[num_rounds]
                 logger.info(f"    {num_rounds} round(s): {count} samples")
         else:
-            logger.info(f"    No samples skipped")
+            logger.info("    No samples skipped")
 
         total_processed += stats["samples_processed"]
         total_skipped += stats["samples_skipped"]
