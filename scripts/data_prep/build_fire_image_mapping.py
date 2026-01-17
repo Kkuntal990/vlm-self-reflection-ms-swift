@@ -87,8 +87,9 @@ DATASET_SPLIT_MAPPING = {
     # ChartQA
     ("chartqa", "train"): {"hf_id": "ahmed-masry/ChartQA", "split": "train", "id_field": None},
     ("chartqa", "test"): {"hf_id": "ahmed-masry/ChartQA", "split": "test", "id_field": None},
-    # MathVista
-    ("mathvista", "images"): {"hf_id": "AI4Math/MathVista", "split": "testmini", "id_field": "pid"},
+    # MathVista - FIRE uses sequential numbering (660.jpg), not pid
+    # Use None for sequential mapping since FIRE renumbered images
+    ("mathvista", "images"): {"hf_id": "AI4Math/MathVista", "split": "testmini", "id_field": None},
     # ScienceQA
     ("scienceqa", "images"): {
         "hf_id": "derek-thomas/ScienceQA",
@@ -111,26 +112,29 @@ DATASET_SPLIT_MAPPING = {
     },
     # DVQA - Using DavidNguyen/DVQA (webdataset format with __key__ field)
     ("dvqa", "images"): {"hf_id": "DavidNguyen/DVQA", "split": "train", "id_field": "__key__"},
-    # AI2D
-    ("ai2d", "images"): {"hf_id": "lmms-lab/ai2d", "split": "test", "id_field": "image"},
-    # MathVerse (multiple versions)
+    # AI2D - FIRE uses sequential numbering (3456.png)
+    # 'image' field is the PIL image itself, not an ID. Use None for sequential.
+    ("ai2d", "images"): {"hf_id": "lmms-lab/ai2d", "split": "test", "id_field": None},
+    # MathVerse (multiple versions) - FIRE uses image_XXX.png naming
+    # HuggingFace has sample_index but FIRE's numbering doesn't match
+    # Use None for sequential mapping
     ("mathverse", "images_version_1-4"): {
         "hf_id": "AI4Math/MathVerse",
         "config": "testmini",
         "split": "testmini",
-        "id_field": "problem",
+        "id_field": None,
     },
     ("mathverse", "images_version_5"): {
         "hf_id": "AI4Math/MathVerse",
         "config": "testmini",
         "split": "testmini",
-        "id_field": "problem",
+        "id_field": None,
     },
     ("mathverse", "images_version_6"): {
         "hf_id": "AI4Math/MathVerse",
         "config": "testmini",
         "split": "testmini",
-        "id_field": "problem",
+        "id_field": None,
     },
     # SEED-Bench - Using data_id field which matches FIRE paths (341486_825594355.jpg)
     ("seedbench", "SEED-Bench-image"): {

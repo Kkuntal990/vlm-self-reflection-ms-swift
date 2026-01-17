@@ -140,7 +140,7 @@ spec:
           value: "PengxiangLi/FIRE"
 
         - name: SPLITS
-          value: "train test"
+          value: "test"
 
         # Only retry datasets with coverage below this threshold (0.0-1.0)
         - name: MIN_COVERAGE
