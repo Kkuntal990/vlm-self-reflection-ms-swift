@@ -54,6 +54,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Default system prompt for self-refinement tasks
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful vision-language assistant. Answer questions about images accurately. "
+    "When given feedback about your previous response, carefully analyze the feedback and "
+    "provide an improved, more accurate response that addresses the issues raised."
+)
+
+
 class VLMInference:
     """Inference engine for Qwen2.5-VL models.
 
@@ -73,6 +81,7 @@ class VLMInference:
         device: str = "cuda",
         dtype: torch.dtype = torch.bfloat16,
         use_flash_attn: bool = True,
+        system_prompt: str | None = None,
     ):
         """Initialize the inference engine.
 
@@ -81,10 +90,18 @@ class VLMInference:
             device: Device to run inference on
             dtype: Model data type
             use_flash_attn: Whether to use flash attention
+            system_prompt: System prompt to use. If None, uses DEFAULT_SYSTEM_PROMPT.
+                          Pass empty string "" to disable system prompt.
         """
         self.model_path = model_path
         self.device = device
         self.dtype = dtype
+
+        # Set system prompt (None means use default, "" means no system prompt)
+        if system_prompt is None:
+            self.system_prompt = DEFAULT_SYSTEM_PROMPT
+        else:
+            self.system_prompt = system_prompt if system_prompt else None
 
         logger.info(f"Loading model from {model_path}")
 
@@ -113,6 +130,10 @@ class VLMInference:
 
         self.model.eval()
         logger.info("Model loaded successfully")
+        if self.system_prompt:
+            logger.info(f"System prompt: {self.system_prompt[:100]}...")
+        else:
+            logger.info("No system prompt configured")
 
     def generate(
         self,
@@ -136,11 +157,17 @@ class VLMInference:
         top_p = config.get("top_p", 0.9)
         do_sample = config.get("do_sample", True)
 
+        # Prepend system message if configured
+        if self.system_prompt:
+            full_messages = [{"role": "system", "content": self.system_prompt}] + messages
+        else:
+            full_messages = messages
+
         # Process inputs
         text = self.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+            full_messages, tokenize=False, add_generation_prompt=True
         )
-        image_inputs, video_inputs = process_vision_info(messages)
+        image_inputs, video_inputs = process_vision_info(full_messages)
 
         inputs = self.processor(
             text=[text],
@@ -597,6 +624,20 @@ Examples:
         help="Disable flash attention",
     )
 
+    # System prompt configuration
+    parser.add_argument(
+        "--system_prompt",
+        type=str,
+        default=None,
+        help="Custom system prompt. If not specified, uses default self-refinement prompt. "
+        "Pass empty string '' to disable system prompt entirely.",
+    )
+    parser.add_argument(
+        "--no_system_prompt",
+        action="store_true",
+        help="Disable system prompt entirely (equivalent to --system_prompt '')",
+    )
+
     return parser.parse_args()
 
 
@@ -604,11 +645,18 @@ def main():
     """Main function for running inference."""
     args = parse_args()
 
+    # Determine system prompt
+    if args.no_system_prompt:
+        system_prompt = ""  # Empty string disables system prompt
+    else:
+        system_prompt = args.system_prompt  # None uses default, string uses custom
+
     # Initialize inference engine
     engine = VLMInference(
         model_path=args.model_path,
         device=args.device,
         use_flash_attn=not args.no_flash_attn,
+        system_prompt=system_prompt,
     )
 
     # Load dataset
