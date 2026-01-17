@@ -227,17 +227,50 @@ class SkyworkVLRewardScorer:
             padding=True,
             return_tensors="pt",
         )
-        inputs = inputs.to(self.device)
+
+        # Move tensors to a compatible device. When device_map="auto" is used, the model may be sharded;
+        # sending inputs to the first parameter device is the safest default.
+        try:
+            target_device = next(self.model.parameters()).device
+        except StopIteration:
+            target_device = torch.device(self.device)
+
+        inputs = {k: v.to(target_device) if hasattr(v, "to") else v for k, v in inputs.items()}
 
         # Get reward score from value head
         with torch.no_grad():
             outputs = self.model(**inputs, return_dict=True, use_cache=False)
-            values = outputs[-1]  # Value head output
 
-            # Get the score at the last token position
-            seq_lengths = inputs["attention_mask"].sum(dim=-1, keepdim=True) - 1
-            scores = values.gather(dim=-1, index=seq_lengths)
-            score = scores[0].item()
+            # TRL value-head models may return values as either an attribute or the last tuple item.
+            values = None
+            if hasattr(outputs, "value"):
+                values = outputs.value
+            elif isinstance(outputs, (tuple, list)):
+                values = outputs[-1]
+            else:
+                # Fallback: try common key name
+                values = getattr(outputs, "values", None)
+
+            if values is None:
+                raise RuntimeError(
+                    "Could not extract value head output from model forward pass. "
+                    "Inspect the returned `outputs` object to locate the value tensor."
+                )
+
+            # Values are typically [bsz, seq_len] or [bsz, seq_len, 1]
+            if values.dim() == 3 and values.size(-1) == 1:
+                values = values.squeeze(-1)
+
+            if values.dim() != 2:
+                raise RuntimeError(f"Unexpected value head tensor shape: {tuple(values.shape)}")
+
+            # Last non-padding token index per sequence
+            seq_lengths = inputs["attention_mask"].sum(dim=1) - 1  # [bsz]
+            seq_lengths = torch.clamp(seq_lengths, min=0)
+
+            batch_idx = torch.arange(values.size(0), device=values.device)
+            scores = values[batch_idx, seq_lengths]  # [bsz]
+            score = float(scores[0].item())
 
         return score
 
@@ -245,12 +278,12 @@ class SkyworkVLRewardScorer:
         self,
         sample: Dict,
         return_details: bool = False,
+        isolated_scoring: bool = False,
     ) -> Union[List[Dict], Dict]:
         """Score all turns in a multi-turn conversation.
 
         This method processes a ShareGPT format sample and scores each
-        assistant response in the conversation. It builds up context
-        progressively to evaluate how responses improve with feedback.
+        assistant response in the conversation.
 
         Args:
             sample: ShareGPT format sample with keys:
@@ -258,6 +291,11 @@ class SkyworkVLRewardScorer:
                 - "images": List of image paths (uses first image)
                 - Optional "system": System prompt (ignored for scoring)
             return_details: If True, return full result dict with metrics
+            isolated_scoring: If True, score each response in isolation
+                (just image + original question + response, ignoring conversation
+                history). This gives a cleaner comparison of response quality
+                without context length effects. If False (default), builds up
+                context progressively to evaluate responses given prior feedback.
 
         Returns:
             If return_details=False: List of turn results
@@ -286,7 +324,16 @@ class SkyworkVLRewardScorer:
         for turn_idx, turn in enumerate(conversation):
             response = turn["assistant"]
 
-            if turn_idx == 0:
+            if isolated_scoring:
+                # Isolated mode: score each response with just image + original question
+                # No conversation history, giving a clean comparison of response quality
+                score = self.score_response(
+                    question=original_question,
+                    response=response,
+                    image_path=image_path,
+                    context_history=None,
+                )
+            elif turn_idx == 0:
                 # First turn: just question + response
                 score = self.score_response(
                     question=original_question,
@@ -295,7 +342,7 @@ class SkyworkVLRewardScorer:
                     context_history=None,
                 )
             else:
-                # Subsequent turns: include history
+                # Subsequent turns: include history (contextual scoring)
                 score = self.score_response(
                     question=original_question,
                     response=response,
@@ -332,10 +379,12 @@ class SkyworkVLRewardScorer:
             "num_turns": len(results),
             "initial_score": scores[0],
             "final_score": scores[-1],
-            "absolute_improvement": scores[-1] - scores[0],
-            "reward_delta": (scores[-1] - scores[0]) / abs(scores[0]) if abs(scores[0]) > 1e-6 else 0,
+            "absolute_improvement": scores[-1] - scores[0],  # kept for backward compatibility
+            "score_delta": scores[-1] - scores[0],
+            "reward_delta": (scores[-1] - scores[0]) / max(abs(scores[0]), 1.0),
             "is_monotonic": all(scores[i] <= scores[i+1] for i in range(len(scores)-1)),
             "improvements_per_turn": [scores[i+1] - scores[i] for i in range(len(scores)-1)],
+            "scoring_mode": "isolated" if isolated_scoring else "contextual",
         }
 
         return {"turns": results, "metrics": metrics}
@@ -389,6 +438,13 @@ def parse_args():
         action="store_true",
         help="Disable flash attention",
     )
+    parser.add_argument(
+        "--isolated",
+        action="store_true",
+        help="Score each response in isolation (just image + question + response, "
+             "ignoring conversation history). Provides cleaner comparison without "
+             "context length effects.",
+    )
 
     return parser.parse_args()
 
@@ -410,13 +466,19 @@ def main():
         with open(args.sample_file, "r") as f:
             sample = json.load(f)
 
-        result = scorer.score_conversation_turns(sample, return_details=True)
+        scoring_mode = "isolated" if args.isolated else "contextual"
+        logger.info(f"Scoring mode: {scoring_mode}")
+
+        result = scorer.score_conversation_turns(
+            sample, return_details=True, isolated_scoring=args.isolated
+        )
 
         print("\n" + "=" * 60)
         print("CONVERSATION SCORING RESULTS")
+        print(f"Scoring Mode: {scoring_mode.upper()}")
         print("=" * 60)
 
-        for turn in result["turns"]:
+        for turn in result["turns"]:  # type: ignore[index]
             print(f"\nTurn {turn['turn_index']}:")
             print(f"  Response: {turn['response']}")
             print(f"  Score: {turn['reward_score']:.2f}")
@@ -426,11 +488,12 @@ def main():
 
         print("\n" + "-" * 60)
         print("METRICS:")
-        metrics = result["metrics"]
+        metrics = result["metrics"]  # type: ignore[index]
         print(f"  Initial Score: {metrics['initial_score']:.2f}")
         print(f"  Final Score: {metrics['final_score']:.2f}")
         print(f"  Absolute Improvement: {metrics['absolute_improvement']:.2f}")
-        print(f"  Reward Delta: {metrics['reward_delta']*100:.1f}%")
+        print(f"  Score Delta (Final - Initial): {metrics['score_delta']:.2f}")
+        print(f"  Reward Delta (normalized): {metrics['reward_delta']*100:.1f}%")
         print(f"  Monotonic Improvement: {metrics['is_monotonic']}")
         print("=" * 60)
 

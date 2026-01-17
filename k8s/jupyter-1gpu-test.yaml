@@ -14,11 +14,11 @@ spec:
 
     resources:
       limits:
-        nvidia.com/gpu: "1"
+        nvidia.com/a100: "1"
         memory: "32Gi"
         cpu: "2"
       requests:
-        nvidia.com/gpu: "1"
+        nvidia.com/a100: "1"
         memory: "32Gi"
         cpu: "2"
 
@@ -121,7 +121,6 @@ spec:
             operator: In
             values:
             - NVIDIA-A100-SXM4-80GB
-            - NVIDIA-A100-80GB-PCIe
 
   volumes:
     - name: cache-volume

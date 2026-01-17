@@ -1,0 +1,19 @@
+{
+  "num_samples": 80,
+  "avg_initial_score": -28.629678942635657,
+  "avg_final_score": -28.733003708720208,
+  "avg_absolute_improvement": -0.10332476608455181,
+  "avg_reward_delta": -1.6245570810882923,
+  "monotonic_improvement_rate": 48.75,
+  "avg_turns_per_sample": 2.325,
+  "avg_improvement_per_turn": -0.07798095553551081,
+  "avg_turns_to_plateau": 1.65,
+  "plateau_threshold": 0.5,
+  "score_delta_std": 6.883164174046412,
+  "score_delta_percentiles": {
+    "p25": -0.3686034003052022,
+    "p50": 0.042287612032705105,
+    "p75": 0.2631171397307196
+  },
+  "improvement_rate": 57.49999999999999
+}

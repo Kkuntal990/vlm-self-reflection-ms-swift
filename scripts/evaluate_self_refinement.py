@@ -119,9 +119,38 @@ def load_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
     return samples
 
 
+def resolve_image_paths(sample: Dict, image_base_dir: str) -> Dict:
+    """Resolve relative image paths to absolute paths.
+
+    Args:
+        sample: Sample dict with 'images' key containing relative paths
+        image_base_dir: Base directory for images
+
+    Returns:
+        Sample with resolved absolute image paths
+    """
+    if "images" not in sample or not sample["images"]:
+        return sample
+
+    resolved_images = []
+    for img_path in sample["images"]:
+        if os.path.isabs(img_path):
+            # Already absolute
+            resolved_images.append(img_path)
+        else:
+            # Resolve relative path
+            resolved = os.path.join(image_base_dir, img_path)
+            resolved_images.append(resolved)
+
+    sample["images"] = resolved_images
+    return sample
+
+
 def evaluate_ground_truth(
     samples: List[Dict],
     scorer: SkyworkVLRewardScorer,
+    image_base_dir: str = "/outputs/fire_images_v2",
+    isolated_scoring: bool = False,
 ) -> List[SampleResult]:
     """Evaluate ground truth responses from the dataset.
 
@@ -131,6 +160,10 @@ def evaluate_ground_truth(
     Args:
         samples: List of ShareGPT format samples
         scorer: Initialized reward model scorer
+        image_base_dir: Base directory for resolving relative image paths
+        isolated_scoring: If True, score each response in isolation (just image +
+            question + response, ignoring conversation history). If False (default),
+            use contextual scoring with full conversation history.
 
     Returns:
         List of SampleResult objects
@@ -139,6 +172,9 @@ def evaluate_ground_truth(
 
     for sample in tqdm(samples, desc="Evaluating ground truth"):
         try:
+            # Resolve image paths
+            sample = resolve_image_paths(sample, image_base_dir)
+
             conversation = sample.get("conversation", [])
             images = sample.get("images", [])
 
@@ -148,7 +184,7 @@ def evaluate_ground_truth(
 
             # Score all turns
             scoring_result = scorer.score_conversation_turns(
-                sample, return_details=True
+                sample, return_details=True, isolated_scoring=isolated_scoring
             )
 
             turns = scoring_result["turns"]
@@ -186,6 +222,8 @@ def evaluate_generated(
     scorer: SkyworkVLRewardScorer,
     max_turns: int = 3,
     generation_config: Optional[Dict] = None,
+    image_base_dir: str = "/outputs/fire_images_v2",
+    isolated_scoring: bool = False,
 ) -> List[SampleResult]:
     """Evaluate generated responses from fine-tuned model.
 
@@ -199,6 +237,10 @@ def evaluate_generated(
         scorer: Initialized reward model scorer
         max_turns: Maximum refinement turns
         generation_config: Generation parameters
+        image_base_dir: Base directory for resolving relative image paths
+        isolated_scoring: If True, score each response in isolation (just image +
+            question + response, ignoring conversation history). If False (default),
+            use contextual scoring with full conversation history.
 
     Returns:
         List of SampleResult objects
@@ -218,6 +260,9 @@ def evaluate_generated(
 
     for sample in tqdm(samples, desc="Evaluating generated responses"):
         try:
+            # Resolve image paths
+            sample = resolve_image_paths(sample, image_base_dir)
+
             # Generate refinement dialogue
             gen_result = generate_refinement_dialogue(
                 engine=engine,
@@ -244,7 +289,7 @@ def evaluate_generated(
 
             # Score generated turns
             scoring_result = scorer.score_conversation_turns(
-                scoring_sample, return_details=True
+                scoring_sample, return_details=True, isolated_scoring=isolated_scoring
             )
 
             turns = scoring_result["turns"]
@@ -504,6 +549,12 @@ def parse_args():
         help="Path to fine-tuned model (required for generated mode)",
     )
     parser.add_argument(
+        "--image_base_dir",
+        type=str,
+        default="/outputs/fire_images_v2",
+        help="Base directory for resolving relative image paths",
+    )
+    parser.add_argument(
         "--reward_model_id",
         type=str,
         default="Skywork/Skywork-VL-Reward-7B",
@@ -528,6 +579,13 @@ def parse_args():
         type=float,
         default=0.5,
         help="Minimum improvement to not count as plateau",
+    )
+    parser.add_argument(
+        "--isolated_scoring",
+        action="store_true",
+        help="Score each response in isolation (just image + question + response, "
+             "ignoring conversation history). Provides cleaner comparison without "
+             "context length effects. Default is contextual scoring with history.",
     )
 
     # Generation configuration (for generated mode)
@@ -593,11 +651,18 @@ def main():
     )
 
     # Run evaluation based on mode
+    scoring_mode = "isolated" if args.isolated_scoring else "contextual"
+    logger.info(f"Scoring mode: {scoring_mode}")
+
     if args.mode == "ground_truth":
         logger.info("Running ground truth evaluation...")
-        results = evaluate_ground_truth(samples, scorer)
+        logger.info(f"Image base directory: {args.image_base_dir}")
+        results = evaluate_ground_truth(
+            samples, scorer, args.image_base_dir, args.isolated_scoring
+        )
     else:
         logger.info("Running generated evaluation...")
+        logger.info(f"Image base directory: {args.image_base_dir}")
         gen_config = {
             "max_new_tokens": args.max_new_tokens,
             "temperature": args.temperature,
@@ -609,6 +674,8 @@ def main():
             scorer,
             args.max_turns,
             gen_config,
+            args.image_base_dir,
+            args.isolated_scoring,
         )
 
     if not results:

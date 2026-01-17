@@ -1,0 +1,56 @@
+
+================================================================================
+                    SELF-REFINEMENT EVALUATION REPORT
+================================================================================
+
+Evaluation Mode: GROUND_TRUTH
+Generated at: 2026-01-17 04:06:40
+
+DATASET STATISTICS
+------------------
+  Total Samples Evaluated: 80
+  Average Turns per Sample: 2.33
+
+REWARD SCORE ANALYSIS
+---------------------
+  Initial Score (Turn 0):
+    Mean: -28.63
+
+  Final Score (Last Turn):
+    Mean: -28.73
+
+  Absolute Improvement:
+    Mean: -0.10
+
+IMPROVEMENT METRICS
+-------------------
+  Reward Delta (% change from initial):
+    Mean: -162.5%
+    Std Dev: 688.3%
+    25th Percentile: -36.9%
+    Median: 4.2%
+    75th Percentile: 26.3%
+
+  Improvement Rate: 57.5%
+    (Samples where final score > initial score)
+
+  Monotonic Improvement Rate: 48.8%
+    (Samples where reward strictly increases each turn)
+
+  Average Improvement per Turn: -0.08
+
+CONVERGENCE ANALYSIS
+--------------------
+  Average Turns to Plateau: 1.65
+    (Plateau threshold: 0.5 reward improvement)
+
+================================================================================
+                              INTERPRETATION
+================================================================================
+
+Key Findings:
+  - Responses DO NOT improve with refinement (-162.5% avg change)
+  - Only 49% of samples show consistent improvement
+  - Improvement plateaus after ~1.6 turns on average
+
+================================================================================
