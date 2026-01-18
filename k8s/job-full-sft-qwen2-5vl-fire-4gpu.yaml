@@ -56,13 +56,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "4"
+            nvidia.com/a100: "8"
             memory: "128Gi"
-            cpu: "8"
+            cpu: "16"
           limits:
-            nvidia.com/a100: "4"
+            nvidia.com/a100: "8"
             memory: "128Gi"
-            cpu: "8"
+            cpu: "16"
 
         volumeMounts:
         - name: cache-volume
@@ -131,7 +131,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "4"           # Number of GPUs
+          value: "8"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"

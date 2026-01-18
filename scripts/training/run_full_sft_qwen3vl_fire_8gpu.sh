@@ -163,8 +163,8 @@ swift sft \
     --gradient_checkpointing true \
     --freeze_vit true \
     --freeze_aligner true \
-    --dataloader_num_workers 8 \
-    --dataset_num_proc 8 \
+    --dataloader_num_workers 4 \
+    --dataset_num_proc 4 \
     --report_to tensorboard \
     --save_only_model true \
     --deepspeed zero2 \
