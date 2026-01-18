@@ -82,12 +82,14 @@ fi
 echo "Checking GPU availability..."
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA not available'; print(f'Found {torch.cuda.device_count()} GPU(s)')"
 
-# Verify dataset exists
-if [ ! -f "$DATASET_PATH" ]; then
-    echo "ERROR: Training dataset not found: $DATASET_PATH"
-    echo "Please ensure the dataset file exists."
-    exit 1
-fi
+# Verify datasets exist (handles multiple space-separated paths)
+for dataset in ${DATASET_PATH}; do
+    if [ ! -f "${dataset}" ]; then
+        echo "ERROR: Training dataset not found: ${dataset}"
+        echo "Please ensure the dataset file exists."
+        exit 1
+    fi
+done
 
 # Create output directory
 mkdir -p "${OUTPUT_PATH}"

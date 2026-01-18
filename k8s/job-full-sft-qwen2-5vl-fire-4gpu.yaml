@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: qwen2-5vl-7b-fire-full-sft-4gpu-job-default_feedback
+  name: qwen2-5vl-7b-fire-full-sft-4gpu-job-default-feedback
 spec:
   backoffLimit: 3
   template:
@@ -28,19 +28,21 @@ spec:
           echo "========================================="
           echo ""
 
-          # Verify dataset exists
-          if [ ! -f "${DATASET_PATH}" ]; then
-            echo "ERROR: Training dataset not found!"
-            echo "Expected: ${DATASET_PATH}"
+          # Verify datasets exist (handles multiple space-separated paths)
+          echo "Checking datasets..."
+          for dataset in ${DATASET_PATH}; do
+            if [ ! -f "${dataset}" ]; then
+              echo "ERROR: Training dataset not found!"
+              echo "Expected: ${dataset}"
+              echo ""
+              echo "Please ensure the dataset file exists."
+              exit 1
+            fi
+            echo "Found: ${dataset}"
+            ls -lh "${dataset}"
+            wc -l "${dataset}"
             echo ""
-            echo "Please ensure the dataset file exists."
-            exit 1
-          fi
-
-          echo "Found dataset:"
-          ls -lh "${DATASET_PATH}"
-          wc -l "${DATASET_PATH}"
-          echo ""
+          done
 
           # GPU verification
           echo "GPU Status:"
