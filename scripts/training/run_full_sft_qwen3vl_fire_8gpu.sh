@@ -170,7 +170,8 @@ swift sft \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \
-    --load_from_cache_file true
+    --load_from_cache_file true \
+    --dataset_shuffle true 
 
 
 echo ""

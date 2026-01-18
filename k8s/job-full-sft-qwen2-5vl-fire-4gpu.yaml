@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: qwen2-5vl-7b-fire-full-sft-4gpu-job-feedback
+  name: qwen2-5vl-7b-fire-full-sft-4gpu-job-default_feedback
 spec:
   backoffLimit: 3
   template:
@@ -55,12 +55,12 @@ spec:
         resources:
           requests:
             nvidia.com/a100: "4"
-            memory: "96Gi"
+            memory: "128Gi"
             cpu: "8"
           limits:
             nvidia.com/a100: "4"
             memory: "128Gi"
-            cpu: "10"
+            cpu: "8"
 
         volumeMounts:
         - name: cache-volume
@@ -79,7 +79,7 @@ spec:
               key: token
               optional: true
 
-        # Cache directories (from scripts/training/env.sh)
+        # Cache directories (using ephemeral emptyDir)
         - name: HF_HOME
           value: "/cache/hf"
         - name: TRANSFORMERS_CACHE
@@ -90,6 +90,8 @@ spec:
           value: "/cache/torch"
         - name: PIP_CACHE_DIR
           value: "/cache/pip"
+        - name: MODELSCOPE_CACHE
+          value: "/cache/modelscope"
         - name: OUTPUT_DIR
           value: "/outputs"
 
@@ -99,11 +101,8 @@ spec:
         # - name: DATASET_PATH
         #   value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
         - name: DATASET_PATH
-          value: "/outputs/fire_feedback/fire_feedback_train.jsonl"
+          value: "/outputs/fire_feedback/fire_feedback_train.jsonl /outputs/fire_preprocessed_v2/fire_messages_train.jsonl"
 
-        # Sequence configuration
-        # MAX_LEN=3584 fits all FIRE samples (~2600 tokens avg) without packing
-        # This prevents OOM by reducing cross-entropy logits memory from 9.8GB to 4.4GB
         - name: MAX_LEN
           value: "3048"
         - name: IMAGE_MAX_TOKEN_NUM
@@ -112,13 +111,13 @@ spec:
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "2"           # Per-GPU batch size (safe with MAX_LEN=3584)
+          value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
-          value: "16"           # Gradient accumulation steps
+          value: "8"           # Gradient accumulation steps
         - name: EPOCHS
           value: "2"           # Number of training epochs
         - name: LR
-          value: "5e-6"        # Learning rate (lower for full fine-tuning)
+          value: "3e-6"        # Learning rate (lower for full fine-tuning)
         - name: WARMUP_RATIO
           value: "0.03"        # Warmup ratio
         - name: WEIGHT_DECAY
@@ -185,8 +184,8 @@ spec:
 
       volumes:
       - name: cache-volume
-        persistentVolumeClaim:
-          claimName: ms-swift-cache-pvc
+        emptyDir:
+          sizeLimit: 200Gi
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc
