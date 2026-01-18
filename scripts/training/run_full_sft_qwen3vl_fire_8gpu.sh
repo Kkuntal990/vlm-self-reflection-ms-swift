@@ -141,7 +141,7 @@ CUDA_VISIBLE_DEVICES="${CUDA_DEVICES}" \
 swift sft \
     --model "${MODEL_ID}" \
     --train_type full \
-    --dataset "${DATASET_PATH}" \
+    --dataset ${DATASET_PATH} \
     --split_dataset_ratio 0.1 \
     --max_length "${MAX_LEN}" \
     --loss_scale "${LOSS_SCALE}" \
