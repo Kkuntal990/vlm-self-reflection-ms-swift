@@ -51,14 +51,23 @@ ANSWER_PROMPT_TEMPLATE = """[ANSWER]
 {question}"""
 
 FEEDBACK_PROMPT_TEMPLATE = """[FEEDBACK]
+Look at the image carefully and evaluate this answer:
 Question: {question}
 Answer: {answer}
-Provide concise, specific feedback focused on errors and missing details."""
+
+First, describe what you actually see in the image relevant to this question.
+Then, compare your observation to the answer provided.
+If the answer matches what you see: respond "CORRECT: [brief reason]"
+If the answer contradicts what you see: respond "ERROR: [specific issue with visual evidence]"
+"""
 
 REFINE_PROMPT_TEMPLATE = """[REFINE]
 Question: {question}
 Feedback: {feedback}
-Revise your previous answer to address the feedback."""
+
+If the feedback says "CORRECT", keep your previous answer unchanged.
+If the feedback identifies an error, revise your answer based on the visual evidence mentioned.
+Provide your final answer:"""
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a helpful vision-language assistant. Provide accurate, detailed, "
@@ -542,8 +551,8 @@ def parse_args():
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.7,
-        help="Sampling temperature",
+        default=0.4,
+        help="Sampling temperature (lower = less hallucination)",
     )
     parser.add_argument(
         "--top_p",
