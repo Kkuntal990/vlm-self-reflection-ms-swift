@@ -14,11 +14,11 @@ spec:
 
     resources:
       limits:
-        nvidia.com/a100: "1"
+        nvidia.com/a100: "0"
         memory: "32Gi"
         cpu: "2"
       requests:
-        nvidia.com/a100: "1"
+        nvidia.com/a100: "0"
         memory: "32Gi"
         cpu: "2"
 
@@ -112,15 +112,15 @@ spec:
       key: nvidia.com/gpu
       operator: Exists
 
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-        - matchExpressions:
-          - key: nvidia.com/gpu.product
-            operator: In
-            values:
-            - NVIDIA-A100-SXM4-80GB
+  # affinity:
+  #   nodeAffinity:
+  #     requiredDuringSchedulingIgnoredDuringExecution:
+  #       nodeSelectorTerms:
+  #       - matchExpressions:
+  #         - key: nvidia.com/gpu.product
+  #           operator: In
+  #           values:
+  #           - NVIDIA-A100-SXM4-80GB
 
   volumes:
     - name: cache-volume

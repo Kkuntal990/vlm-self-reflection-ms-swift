@@ -1,21 +1,46 @@
 #!/usr/bin/env python3
 """
-Self-reflective inference using mode-tagged prompts.
+Self-reflective inference with natural role assignments.
 
-This script generates multi-turn self-reflective dialogues where the model:
-1. Generates an initial answer with [ANSWER] mode
-2. Generates its own feedback with [FEEDBACK] mode
-3. Refines the answer with [REFINE] mode
-4. Repeats until matching ground truth turn count
+This script uses a natural conversation flow where:
+1. Model generates an answer (as assistant)
+2. For feedback: answer appears as assistant's own output, user asks for critique
+3. For refinement: feedback appears as user message, model revises
 
-The model stays in assistant role throughout - mode tags switch task intent
-without role flipping.
+Key insight: The model should "own" both the answer it critiques AND
+receive feedback as user input when refining. This matches natural
+conversation patterns.
+
+Conversation Flow:
+
+    Turn 0 - Initial Answer:
+        User: [image] + question
+        Assistant: initial_answer
+
+    Turn 1+ - Feedback Generation (ACCUMULATED history, critic mode, FLIPPED roles):
+        Assistant: {question} + [image]
+        User: answer_0
+        Assistant: feedback_0
+        User: answer_1
+        Assistant: feedback_1
+        ...
+        User: current_answer
+        Assistant: <generates feedback>
+
+    Turn 1+ - Refinement (VL assistant mode, ACCUMULATED history):
+        User: [image] + question
+        Assistant: answer_0
+        User: feedback_0
+        Assistant: answer_1
+        User: feedback_1
+        ...
+        Assistant: <refined answer>
 
 Usage:
-    python scripts/evaluation/self_reflective_inference.py \
+    python scripts/evaluation/self_reflective_inference_v2.py \
         --model_path /outputs/checkpoint-final \
         --dataset_path data/fire_preprocessed_v2/fire_messages_test.jsonl \
-        --output_path outputs/self_reflective_results.jsonl \
+        --output_path outputs/self_reflective_v2_results.jsonl \
         --image_base_dir /outputs \
         --max_samples 10
 
@@ -44,20 +69,8 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================
-# Mode Prompt Templates
+# System Prompts (matching training data)
 # ============================================
-
-# ===========================================
-# Original Training Format (fire_messages + fire_feedback)
-# ===========================================
-
-# For generating answers - just the question
-ANSWER_PROMPT_TEMPLATE = """{question}"""
-
-# For refining answers - feedback + explicit instruction to output only answer
-REFINE_PROMPT_TEMPLATE = """{feedback}
-
-Based on the above feedback, provide your revised answer only:"""
 
 # System prompt for VL Assistant (from fire_messages training)
 VL_ASSISTANT_SYSTEM_PROMPT = (
@@ -73,9 +86,6 @@ FEEDBACK_CRITIC_SYSTEM_PROMPT = (
     "to visual questions. Given an image, a question, and an answer, identify "
     "what is correct, what needs improvement, and provide specific suggestions."
 )
-
-# Default uses VL assistant for answer generation
-DEFAULT_SYSTEM_PROMPT = VL_ASSISTANT_SYSTEM_PROMPT
 
 
 # ============================================
@@ -119,14 +129,13 @@ class SampleResult:
 
 
 class SelfReflectionEngine:
-    """Inference engine for self-reflective generation with mode-tagged prompts.
+    """Inference engine for self-reflective generation with role-flipped feedback.
 
     Attributes:
         model_path: Path to the fine-tuned model checkpoint
         model: The loaded model
         processor: The model's processor
         device: Device for inference
-        system_prompt: System prompt to use for all generations
     """
 
     def __init__(
@@ -135,7 +144,6 @@ class SelfReflectionEngine:
         device: str = "cuda",
         dtype: torch.dtype = torch.bfloat16,
         use_flash_attn: bool = True,
-        system_prompt: str | None = None,
     ):
         """Initialize the inference engine.
 
@@ -144,19 +152,10 @@ class SelfReflectionEngine:
             device: Device to run inference on
             dtype: Model data type
             use_flash_attn: Whether to use flash attention
-            system_prompt: System prompt (None uses default, "" disables)
         """
         self.model_path = model_path
         self.device = device
         self.dtype = dtype
-
-        # Set system prompt
-        if system_prompt is None:
-            self.system_prompt = DEFAULT_SYSTEM_PROMPT
-        elif system_prompt == "":
-            self.system_prompt = None
-        else:
-            self.system_prompt = system_prompt
 
         logger.info(f"Loading model from {model_path}")
 
@@ -190,34 +189,29 @@ class SelfReflectionEngine:
     def generate(
         self,
         messages: list[dict],
+        system_prompt: str,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         top_p: float = 0.9,
         do_sample: bool = True,
-        system_prompt: str | None = None,
     ) -> str:
         """Generate a response given the message history.
 
         Args:
-            messages: List of messages in chat format
+            messages: List of messages in chat format (without system prompt)
+            system_prompt: System prompt to use
             max_new_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             top_p: Nucleus sampling probability
             do_sample: Whether to use sampling
-            system_prompt: Override system prompt for this call (None uses default)
 
         Returns:
             Generated response text
         """
         from qwen_vl_utils import process_vision_info
 
-        # Use override system prompt if provided, otherwise use default
-        active_system_prompt = system_prompt if system_prompt is not None else self.system_prompt
-
-        # Prepend system prompt if set
-        full_messages = []
-        if active_system_prompt:
-            full_messages.append({"role": "system", "content": active_system_prompt})
+        # Build full messages with system prompt
+        full_messages = [{"role": "system", "content": system_prompt}]
         full_messages.extend(messages)
 
         # Process inputs
@@ -285,16 +279,23 @@ def load_dataset(dataset_path: str, max_samples: int = 0) -> list[dict]:
     return samples
 
 
-def resolve_image_path(image_path: str, image_base_dir: str) -> str | None:
+def resolve_image_path(image_path: str | dict, image_base_dir: str) -> str | None:
     """Resolve relative image path to absolute path.
 
     Args:
-        image_path: Relative or absolute image path
+        image_path: Relative or absolute image path (str or dict with 'path' key)
         image_base_dir: Base directory for relative paths
 
     Returns:
         Absolute path if exists, None otherwise
     """
+    # Handle dict format: {'bytes': None, 'path': '/path/to/image.jpg'}
+    if isinstance(image_path, dict):
+        image_path = image_path.get("path", "")
+        if not image_path:
+            logger.warning("Image dict has no 'path' key")
+            return None
+
     if os.path.isabs(image_path):
         full_path = image_path
     else:
@@ -339,7 +340,7 @@ def parse_sample(sample: dict) -> tuple[str, list[str], list[str], str | None]:
 
 
 # ============================================
-# Self-Reflective Generation
+# Self-Reflective Generation with Role Flip
 # ============================================
 
 
@@ -350,11 +351,18 @@ def generate_self_reflective_dialogue(
     image_base_dir: str,
     generation_config: dict,
 ) -> SampleResult | None:
-    """Generate a self-reflective dialogue for a sample.
+    """Generate a self-reflective dialogue with role-flipped feedback.
 
-    The model generates:
-    - Turn 0: Initial answer using [ANSWER] prompt
-    - Turn 1+: Feedback using [FEEDBACK], then refined answer using [REFINE]
+    Conversation Flow:
+        Turn 0:
+            User: [image] + question
+            Assistant: initial_answer
+
+        Turn 1+:
+            User: [image] + question
+            Assistant: previous_answer
+            User: <feedback>  ← Role-flipped (feedback as user message)
+            Assistant: <refined answer>
 
     Args:
         engine: Self-reflection inference engine
@@ -395,124 +403,143 @@ def generate_self_reflective_dialogue(
 
     # Track generated turns and message history
     generated_turns = []
-    messages_history = []
+    full_history = []  # For logging
 
     # Clean question (remove any <image> tag if present)
     clean_question = question.replace("<image>", "").strip()
 
+    # Build initial user message with image (matches fire_messages format)
+    # Format: "Question text\n<image>" - the <image> tag tells the model where to look
+    initial_user_message = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": clean_question},
+            {"type": "image", "image": image_path},
+        ],
+    }
+
+    # Running conversation history for refinement (accumulates across turns)
+    # Format: [user_question, assistant_answer_0, user_feedback_0, assistant_answer_1, ...]
+    refinement_history = [initial_user_message]
+
+    # Running conversation history for feedback (accumulates with FLIPPED roles)
+    # Format: [assistant_question, user_answer_0, assistant_feedback_0, user_answer_1, ...]
+    # Matches fire_feedback training format
+    critic_history = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "image", "image": image_path},
+                {"type": "text", "text": clean_question},
+            ],
+        }
+    ]
+
     for turn_idx in range(num_turns):
         if turn_idx == 0:
-            # Turn 0: Generate initial answer with [ANSWER] prompt
-            answer_prompt = ANSWER_PROMPT_TEMPLATE.format(question=clean_question)
-
-            # First message includes the image
-            user_message = {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": image_path},
-                    {"type": "text", "text": answer_prompt},
-                ],
-            }
-            messages_history.append(user_message)
-
-            # Generate answer
+            # =====================================================
+            # Turn 0: Generate initial answer
+            # =====================================================
             answer = engine.generate(
-                messages=messages_history,
+                messages=refinement_history,
+                system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 top_p=top_p,
             )
 
-            # Add assistant response to history
-            messages_history.append({"role": "assistant", "content": answer})
+            # Add to refinement history
+            refinement_history.append({"role": "assistant", "content": answer})
 
-            # Store turn (no feedback for turn 0 yet, will be added if there are more turns)
+            # Add to critic history (with flipped role - answer is USER)
+            critic_history.append({"role": "user", "content": answer})
+
+            # Log history
+            full_history.append({"role": "user", "content": f"[IMAGE]\n{clean_question}"})
+            full_history.append({"role": "assistant", "content": answer})
+
+            # Store turn
             generated_turns.append({"answer": answer, "feedback": ""})
 
         else:
-            # Turn 1+: Generate feedback on previous answer, then refine
-
-            # Get previous answer
-            prev_answer = generated_turns[-1]["answer"]
-
             # =====================================================
-            # Generate feedback using FEEDBACK CRITIC system prompt
-            # This matches fire_feedback training format:
-            # - System: feedback critic prompt
-            # - Assistant: question + image (we simulate by putting in context)
-            # - User: answer to evaluate
-            # - Assistant: generates feedback
+            # Turn 1+: Generate feedback, then refine with role flip
             # =====================================================
-            feedback_messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": image_path},
-                        {"type": "text", "text": f"{clean_question}\n\n{prev_answer}"},
-                    ],
-                }
-            ]
 
-            # Generate feedback with feedback critic system prompt
+            # -------------------------------------------------
+            # Step 1: Generate feedback using CRITIC system prompt
+            #
+            # IMPORTANT: Matches fire_feedback training format with FLIPPED roles
+            # and ACCUMULATED history:
+            #   Assistant: question + <image>
+            #   User: answer_0
+            #   Assistant: feedback_0
+            #   User: answer_1
+            #   Assistant: feedback_1
+            #   ...
+            #   User: current_answer (already in critic_history)
+            #   Assistant: <generates next feedback>
+            #
+            # This is the exact format the model was trained on for feedback.
+            # -------------------------------------------------
             feedback = engine.generate(
-                messages=feedback_messages,
+                messages=critic_history,  # Uses accumulated history
+                system_prompt=FEEDBACK_CRITIC_SYSTEM_PROMPT,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                system_prompt=FEEDBACK_CRITIC_SYSTEM_PROMPT,
             )
 
-            # Record in history for logging (show what happened)
-            messages_history.append(
-                {
-                    "role": "user",
-                    "content": f"[FEEDBACK REQUEST]\nQuestion: {clean_question}\nAnswer: {prev_answer}",
-                }
-            )
-            messages_history.append({"role": "assistant", "content": feedback})
+            # Add feedback to critic history for next iteration
+            critic_history.append({"role": "assistant", "content": feedback})
 
-            # Update previous turn with the feedback
+            # Update previous turn with feedback
             generated_turns[-1]["feedback"] = feedback
 
-            # =====================================================
-            # Generate refined answer using VL ASSISTANT system prompt
-            # This matches fire_messages training format:
-            # - User: feedback
-            # - Assistant: revised answer
-            # =====================================================
-            refine_prompt = REFINE_PROMPT_TEMPLATE.format(feedback=feedback)
+            # Log the feedback generation
+            full_history.append({
+                "role": "user",
+                "content": f"[FEEDBACK]: {feedback}"
+            })
 
-            messages_history.append({"role": "user", "content": refine_prompt})
+            # -------------------------------------------------
+            # Step 2: Generate refined answer using ACCUMULATED history
+            #
+            # The model sees the FULL conversation so far:
+            #   User: [image] + question
+            #   Assistant: answer_0
+            #   User: feedback_0
+            #   Assistant: answer_1
+            #   User: feedback_1
+            #   ...
+            #   Assistant: <generate next refined answer>
+            # -------------------------------------------------
+
+            # Add feedback to refinement history as user message
+            refinement_history.append({"role": "user", "content": feedback})
 
             refined_answer = engine.generate(
-                messages=messages_history,
+                messages=refinement_history,
+                system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 top_p=top_p,
             )
 
-            messages_history.append({"role": "assistant", "content": refined_answer})
+            # Add refined answer to history for next iteration
+            refinement_history.append({"role": "assistant", "content": refined_answer})
+
+            # Add refined answer to critic history (with flipped role - answer is USER)
+            critic_history.append({"role": "user", "content": refined_answer})
+
+            # Log the refinement
+            full_history.append({"role": "assistant", "content": refined_answer})
 
             # Store this turn
             generated_turns.append({"answer": refined_answer, "feedback": ""})
 
     # Get final generated answer
     final_answer = generated_turns[-1]["answer"] if generated_turns else ""
-
-    # Serialize messages history (convert image objects to strings for JSON)
-    serializable_history = []
-    for msg in messages_history:
-        if isinstance(msg.get("content"), list):
-            # Convert complex content to string representation
-            content_parts = []
-            for part in msg["content"]:
-                if part.get("type") == "image":
-                    content_parts.append(f"[IMAGE: {part.get('image', '')}]")
-                elif part.get("type") == "text":
-                    content_parts.append(part.get("text", ""))
-            serializable_history.append({"role": msg["role"], "content": "\n".join(content_parts)})
-        else:
-            serializable_history.append(msg)
 
     return SampleResult(
         sample_index=sample_index,
@@ -522,7 +549,7 @@ def generate_self_reflective_dialogue(
         final_answer=final_answer,
         gt_final_answer=gt_final_answer,
         num_turns=num_turns,
-        messages_history=serializable_history,
+        messages_history=full_history,
     )
 
 
@@ -534,7 +561,7 @@ def generate_self_reflective_dialogue(
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Self-reflective inference with mode-tagged prompts",
+        description="Self-reflective inference with role-flipped feedback",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -594,12 +621,6 @@ def parse_args():
 
     # Model configuration
     parser.add_argument(
-        "--system_prompt",
-        type=str,
-        default=None,
-        help="Override system prompt (empty string to disable)",
-    )
-    parser.add_argument(
         "--device",
         type=str,
         default="cuda",
@@ -616,7 +637,7 @@ def parse_args():
 
 
 def main():
-    """Main function for self-reflective inference."""
+    """Main function for self-reflective inference with role-flipped feedback."""
     args = parse_args()
 
     # Initialize engine
@@ -624,7 +645,6 @@ def main():
         model_path=args.model_path,
         device=args.device,
         use_flash_attn=not args.no_flash_attn,
-        system_prompt=args.system_prompt,
     )
 
     # Load dataset
@@ -645,7 +665,7 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w") as f:
-        for i, sample in enumerate(tqdm(samples, desc="Self-reflective inference")):
+        for i, sample in enumerate(tqdm(samples, desc="Self-reflective inference (v2)")):
             try:
                 result = generate_self_reflective_dialogue(
                     engine=engine,
@@ -667,7 +687,7 @@ def main():
 
     # Print summary
     print("\n" + "=" * 60)
-    print("SELF-REFLECTIVE INFERENCE SUMMARY")
+    print("SELF-REFLECTIVE INFERENCE V2 (Role-Flipped) SUMMARY")
     print("=" * 60)
     print(f"Total samples: {len(samples)}")
     print(f"Successfully processed: {len(results)}")
@@ -683,8 +703,11 @@ def main():
         first = results[0]
         print(f"Question: {first.question[:100]}...")
         print(f"Num turns: {first.num_turns}")
-        print(f"Final answer: {first.final_answer[:100]}...")
-        print(f"GT final answer: {first.gt_final_answer[:100]}...")
+        for i, turn in enumerate(first.generated_turns):
+            print(f"  Turn {i}: {turn['answer'][:80]}...")
+            if turn['feedback']:
+                print(f"    Feedback: {turn['feedback'][:80]}...")
+        print(f"GT final: {first.gt_final_answer[:100]}...")
 
     print("=" * 60)
 
