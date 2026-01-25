@@ -58,12 +58,12 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "8"
-            memory: "196Gi"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
             cpu: "8"
           limits:
-            nvidia.com/a100: "8"
-            memory: "196Gi"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
             cpu: "8"
 
         volumeMounts:
@@ -133,7 +133,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "8"           # Number of GPUs
+          value: "4"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -142,7 +142,7 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-2"
+          value: "qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2"
 
         # Logging configuration
         - name: LOGGING_STEPS
@@ -172,9 +172,9 @@ spec:
           operator: Exists
           effect: NoSchedule
         # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
-        - key: nautilus.io/issue
-          operator: Exists
-          effect: NoSchedule
+        # - key: nautilus.io/issue
+        #   operator: Exists
+        #   effect: NoSchedule
 
       affinity:
         nodeAffinity:
