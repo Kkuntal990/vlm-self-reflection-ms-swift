@@ -167,7 +167,6 @@ swift sft \
     --freeze_aligner true \
     --dataloader_num_workers 4 \
     --dataset_num_proc 4 \
-    --report_to tensorboard \
     --save_only_model true \
     --deepspeed zero3 \
     --packing false \

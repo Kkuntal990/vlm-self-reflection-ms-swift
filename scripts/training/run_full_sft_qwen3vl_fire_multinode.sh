@@ -195,14 +195,14 @@ swift sft \
     --freeze_aligner true \
     --dataloader_num_workers 8 \
     --dataset_num_proc 8 \
-    --report_to tensorboard \
     --save_only_model true \
     --deepspeed zero2 \
     --packing false \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \
-    --load_from_cache_file true
+    --load_from_cache_file true \
+    --dataset_shuffle true 
 
 
 echo ""
