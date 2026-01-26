@@ -169,7 +169,7 @@ swift sft \
     --dataset_num_proc 4 \
     --report_to tensorboard \
     --save_only_model true \
-    --deepspeed zero2 \
+    --deepspeed zero3 \
     --packing false \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \

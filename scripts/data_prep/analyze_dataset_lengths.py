@@ -92,7 +92,7 @@ def analyze_dataset(
     dataset_path: Path,
     model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct",
     image_token_count: int = 2048,
-    max_samples: int = None,
+    max_samples: int = 0,
 ):
     """Analyze token distribution in dataset."""
 

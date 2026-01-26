@@ -58,13 +58,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "4"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/a100: "2"
+            memory: "96Gi"
+            cpu: "6"
           limits:
-            nvidia.com/a100: "4"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/a100: "2"
+            memory: "96Gi"
+            cpu: "6"
 
         volumeMounts:
         - name: cache-volume
@@ -117,7 +117,7 @@ spec:
         - name: BATCH
           value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
-          value: "8"           # Gradient accumulation steps
+          value: "16"           # Gradient accumulation steps
         - name: EPOCHS
           value: "1"           # Number of training epochs
         - name: LR
@@ -133,7 +133,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "4"           # Number of GPUs
+          value: "2"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -189,11 +189,11 @@ spec:
       volumes:
       - name: cache-volume
         emptyDir:
-          sizeLimit: 300Gi
+          sizeLimit: 200Gi
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc
       - name: dev-shm
         emptyDir:
           medium: Memory
-          sizeLimit: 64Gi
+          sizeLimit: 48Gi
