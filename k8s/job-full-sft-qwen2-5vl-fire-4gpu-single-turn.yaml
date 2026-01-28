@@ -59,12 +59,12 @@ spec:
         resources:
           requests:
             nvidia.com/a100: "4"
-            memory: "96Gi"
-            cpu: "6"
+            memory: "128Gi"
+            cpu: "8"
           limits:
             nvidia.com/a100: "4"
-            memory: "96Gi"
-            cpu: "6"
+            memory: "128Gi"
+            cpu: "8"
 
         volumeMounts:
         - name: cache-volume
@@ -143,6 +143,8 @@ spec:
         # Output configuration
         - name: RUN_NAME
           value: "qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2"
+        - name: RESUME_PATH
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v11-20260128-012325/checkpoint-1500"
 
         # Logging configuration
         - name: LOGGING_STEPS
@@ -168,9 +170,9 @@ spec:
         - effect: PreferNoSchedule
           key: nvidia.com/gpu
           operator: Exists
-        - key: nautilus.io/reservation
-          operator: Exists
-          effect: NoSchedule
+        # - key: nautilus.io/reservation
+        #   operator: Exists
+        #   effect: NoSchedule
         # # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
         # - key: nautilus.io/issue
         #   operator: Exists

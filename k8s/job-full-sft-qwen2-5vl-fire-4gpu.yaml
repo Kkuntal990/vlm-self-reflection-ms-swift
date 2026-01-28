@@ -58,12 +58,12 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "2"
-            memory: "96Gi"
+            nvidia.com/a100: "3"
+            memory: "128Gi"
             cpu: "4"
           limits:
-            nvidia.com/a100: "2"
-            memory: "96Gi"
+            nvidia.com/a100: "3"
+            memory: "128Gi"
             cpu: "4"
 
         volumeMounts:
@@ -117,7 +117,7 @@ spec:
         - name: BATCH
           value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
-          value: "16"           # Gradient accumulation steps
+          value: "8"           # Gradient accumulation steps
         - name: EPOCHS
           value: "2"           # Number of training epochs
         - name: LR
@@ -133,7 +133,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "2"           # Number of GPUs
+          value: "3"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"

@@ -58,6 +58,9 @@ NPROC="${NPROC:-8}"
 RUN_NAME="${RUN_NAME:-qwen2_5vl-7b-instruct-fire-full-sft}"
 OUTPUT_PATH="${OUTPUT_DIR}/${RUN_NAME}"
 
+# Checkpoint resumption (optional - set RESUME_PATH from K8s to resume)
+RESUME_PATH="${RESUME_PATH:-}"
+
 # ============================================
 # Logging and Checkpointing
 # ============================================
@@ -138,6 +141,13 @@ echo "========================================="
 # Auto-generate CUDA_VISIBLE_DEVICES based on NPROC
 CUDA_DEVICES=$(seq -s, 0 $((NPROC - 1)))
 
+# Build resume argument if checkpoint path is provided
+RESUME_ARG=""
+if [ -n "${RESUME_PATH}" ]; then
+    RESUME_ARG="--resume_from_checkpoint ${RESUME_PATH}"
+    echo "Resuming from checkpoint: ${RESUME_PATH}"
+fi
+
 NPROC_PER_NODE="${NPROC}" \
 CUDA_VISIBLE_DEVICES="${CUDA_DEVICES}" \
 swift sft \
@@ -174,7 +184,8 @@ swift sft \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \
     --load_from_cache_file true \
-    --dataset_shuffle true 
+    --dataset_shuffle true \
+    ${RESUME_ARG} 
 
 
 echo ""
