@@ -58,11 +58,11 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "4"
+            nvidia.com/a100: "5"
             memory: "128Gi"
             cpu: "8"
           limits:
-            nvidia.com/a100: "4"
+            nvidia.com/a100: "5"
             memory: "128Gi"
             cpu: "8"
 
@@ -117,7 +117,7 @@ spec:
         - name: BATCH
           value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
-          value: "8"           # Gradient accumulation steps
+          value: "16"           # Gradient accumulation steps
         - name: EPOCHS
           value: "1"           # Number of training epochs
         - name: LR
@@ -133,7 +133,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "4"           # Number of GPUs
+          value: "5"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -144,7 +144,7 @@ spec:
         - name: RUN_NAME
           value: "qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2"
         - name: RESUME_PATH
-          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v11-20260128-012325/checkpoint-1500"
+          value: ""
 
         # Logging configuration
         - name: LOGGING_STEPS
