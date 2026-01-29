@@ -28,22 +28,20 @@ spec:
           set -euo pipefail
 
           echo "========================================="
-          echo "Self-Refinement Evaluation Pipeline"
+          echo "Self-Reflective Inference V2 Pipeline"
           echo "========================================="
           echo ""
-          echo "Mode: ${EVAL_MODE}"
-          echo "Reward Model: ${REWARD_MODEL_ID}"
-          echo "Dataset: ${DATASET_PATH}"
           echo "Model Path: ${MODEL_PATH}"
+          echo "Dataset: ${DATASET_PATH}"
+          echo "Output: ${OUTPUT_PATH}"
+          echo "Image Base Dir: ${IMAGE_BASE_DIR}"
+          echo "Start Index: ${START_INDEX}"
           echo "Max Samples: ${MAX_SAMPLES} (0 = all)"
+          echo "Temperature: ${TEMPERATURE}"
+          echo "Feedback Temperature: ${FEEDBACK_TEMPERATURE}"
           echo ""
-
-          # Note: trl, safetensors, matplotlib, seaborn are now in requirements.txt
-          # If using an older image, uncomment the line below:
-          # pip install --quiet trl safetensors matplotlib seaborn
 
           # Verify GPU availability
-          echo ""
           echo "GPU Status:"
           nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
           echo ""
@@ -51,9 +49,6 @@ spec:
           # Verify dataset exists
           if [ ! -f "${DATASET_PATH}" ]; then
             echo "ERROR: Test dataset not found: ${DATASET_PATH}"
-            echo ""
-            echo "Available files in /outputs/fire_preprocessed_v2/:"
-            ls -lh /outputs/fire_preprocessed_v2/ 2>/dev/null || echo "Directory not found"
             exit 1
           fi
 
@@ -62,85 +57,44 @@ spec:
           echo "Sample count: $(wc -l < "${DATASET_PATH}")"
           echo ""
 
-          # For generated mode, verify model checkpoint exists
-          if [ "${EVAL_MODE}" = "generated" ]; then
-            if [ ! -d "${MODEL_PATH}" ] && [ ! -f "${MODEL_PATH}/config.json" ]; then
-              echo "WARNING: Model checkpoint not found at ${MODEL_PATH}"
-              echo "Checking if it's a HuggingFace model ID..."
-              # Will be validated by the script
-            else
-              echo "Model checkpoint found:"
-              ls -lh "${MODEL_PATH}/" | head -5
-              echo ""
-            fi
+          # Verify model checkpoint exists
+          if [ ! -d "${MODEL_PATH}" ] && [ ! -f "${MODEL_PATH}/config.json" ]; then
+            echo "WARNING: Model checkpoint not found at ${MODEL_PATH}"
+            echo "Checking if it's a HuggingFace model ID..."
+          else
+            echo "Model checkpoint found:"
+            ls -lh "${MODEL_PATH}/" | head -5
+            echo ""
           fi
 
           # Create output directory
-          mkdir -p "${OUTPUT_DIR}/evaluation_results"
+          mkdir -p "$(dirname "${OUTPUT_PATH}")"
 
-          # Run evaluation
-          echo "Starting evaluation..."
+          # Run self-reflective inference
+          echo "Starting self-reflective inference..."
           echo ""
 
-          if [ "${EVAL_MODE}" = "ground_truth" ]; then
-            # Ground truth mode: score existing dataset responses
-            python /workspace/scripts/evaluation/evaluate_self_refinement.py \
-              --dataset_path "${DATASET_PATH}" \
-              --output_dir "${OUTPUT_DIR}/evaluation_results" \
-              --mode ground_truth \
-              --reward_model_id "${REWARD_MODEL_ID}" \
-              --max_samples ${MAX_SAMPLES} \
-              --plateau_threshold ${PLATEAU_THRESHOLD}
-          else
-            # Generated mode: generate responses then score
-            python /workspace/scripts/evaluation/evaluate_self_refinement.py \
-              --dataset_path "${DATASET_PATH}" \
-              --model_path "${MODEL_PATH}" \
-              --output_dir "${OUTPUT_DIR}/evaluation_results" \
-              --mode generated \
-              --reward_model_id "${REWARD_MODEL_ID}" \
-              --max_samples ${MAX_SAMPLES} \
-              --max_turns ${MAX_TURNS} \
-              --temperature ${TEMPERATURE} \
-              --top_p ${TOP_P} \
-              --max_new_tokens ${MAX_NEW_TOKENS} \
-              --plateau_threshold ${PLATEAU_THRESHOLD}
-          fi
+          python /workspace/scripts/evaluation/self_reflective_inference_v2.py \
+            --model_path "${MODEL_PATH}" \
+            --dataset_path "${DATASET_PATH}" \
+            --output_path "${OUTPUT_PATH}" \
+            --image_base_dir "${IMAGE_BASE_DIR}" \
+            --temperature ${TEMPERATURE} \
+            --feedback_temperature ${FEEDBACK_TEMPERATURE} \
+            --start_index ${START_INDEX} \
+            --max_samples ${MAX_SAMPLES}
 
           echo ""
           echo "========================================="
-          echo "Running Detailed Analysis..."
+          echo "Inference Complete"
           echo "========================================="
           echo ""
-
-          # Run detailed analysis
-          python /workspace/scripts/evaluation/analyze_refinement_metrics.py \
-            --results_path "${OUTPUT_DIR}/evaluation_results/sample_results.jsonl" \
-            --output_dir "${OUTPUT_DIR}/evaluation_results/analysis" \
-            --n_extreme 10
-
+          echo "Results saved to: ${OUTPUT_PATH}"
+          ls -lh "${OUTPUT_PATH}"
           echo ""
-          echo "========================================="
-          echo "Evaluation Complete"
-          echo "========================================="
-          echo ""
-          echo "Results saved to: ${OUTPUT_DIR}/evaluation_results/"
-          ls -lh "${OUTPUT_DIR}/evaluation_results/"
-          echo ""
-          echo "Analysis saved to: ${OUTPUT_DIR}/evaluation_results/analysis/"
-          ls -lh "${OUTPUT_DIR}/evaluation_results/analysis/" 2>/dev/null || echo "Analysis directory not found"
-          echo ""
-
-          # Print summary report
-          if [ -f "${OUTPUT_DIR}/evaluation_results/evaluation_report.txt" ]; then
-            echo "========================================="
-            echo "EVALUATION REPORT"
-            echo "========================================="
-            cat "${OUTPUT_DIR}/evaluation_results/evaluation_report.txt"
-          fi
 
         env:
-        # HuggingFace token (required for reward model)
+        # HuggingFace token
         - name: HF_TOKEN
           valueFrom:
             secretKeyRef:
@@ -157,41 +111,28 @@ spec:
           value: "/cache/hf/datasets"
         - name: TORCH_HOME
           value: "/cache/torch"
-        - name: OUTPUT_DIR
-          value: "/outputs"
 
-        # Evaluation configuration
-        - name: EVAL_MODE
-          value: "generated"  # "ground_truth" or "generated"
-
-        # Dataset path (test set)
-        - name: DATASET_PATH
-          value: "/outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl"
-
-        # Fine-tuned model path (required for generated mode)
-        # UPDATE THIS to your checkpoint path
+        # Model and dataset paths
         - name: MODEL_PATH
-          value: "${MODEL_CHECKPOINT_PATH}"  # e.g., "/outputs/qwen2_5vl-7b-fire-full-sft/checkpoint-final"
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
+        - name: DATASET_PATH
+          value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
+        - name: OUTPUT_PATH
+          value: "/outputs/inference_v4/self_reflective_feedback_results_all.jsonl"
+        - name: IMAGE_BASE_DIR
+          value: "/outputs/image_base"
 
-        # Reward model
-        - name: REWARD_MODEL_ID
-          value: "Skywork/Skywork-VL-Reward-7B"
-
-        # Evaluation parameters
+        # Sampling parameters
+        - name: START_INDEX
+          value: "0"
         - name: MAX_SAMPLES
-          value: "0"  # 0 = all, use smaller number for testing (e.g., 100)
-        - name: MAX_TURNS
-          value: "3"  # Maximum refinement turns for generated mode
-        - name: PLATEAU_THRESHOLD
-          value: "0.5"  # Minimum improvement to not count as plateau
+          value: "0"
 
-        # Generation parameters (for generated mode)
+        # Generation parameters
         - name: TEMPERATURE
-          value: "0.7"
-        - name: TOP_P
-          value: "0.9"
-        - name: MAX_NEW_TOKENS
-          value: "512"
+          value: "0.3"
+        - name: FEEDBACK_TEMPERATURE
+          value: "0"
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED
@@ -201,17 +142,15 @@ spec:
 
         resources:
           requests:
-            nvidia.com/gpu: "2"
-            memory: "96Gi"
-            cpu: "8"
+            nvidia.com/rtxa6000: "1"
+            memory: "16Gi"
+            cpu: "2"
           limits:
-            nvidia.com/gpu: "2"
-            memory: "128Gi"
-            cpu: "16"
+            nvidia.com/rtxa6000: "1"
+            memory: "16Gi"
+            cpu: "2"
 
         volumeMounts:
-        - name: cache-volume
-          mountPath: /cache
         - name: outputs-volume
           mountPath: /outputs
         - name: dev-shm
@@ -232,21 +171,10 @@ spec:
           operator: Exists
           effect: NoSchedule
 
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: nvidia.com/gpu.product
-                operator: In
-                values:
-                - NVIDIA-A100-SXM4-80GB
-                - NVIDIA-A100-80GB-PCIe
-
       volumes:
       - name: cache-volume
-        persistentVolumeClaim:
-          claimName: ms-swift-cache-pvc
+        emptyDir:
+          sizeLimit: 100Gi
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc
