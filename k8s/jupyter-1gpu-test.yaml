@@ -14,12 +14,12 @@ spec:
 
     resources:
       limits:
-        nvidia.com/a100: "0"
-        memory: "32Gi"
+        nvidia.com/rtxa6000: "1"
+        memory: "16Gi"
         cpu: "2"
       requests:
-        nvidia.com/a100: "0"
-        memory: "32Gi"
+        nvidia.com/rtxa6000: "1"
+        memory: "16Gi"
         cpu: "2"
 
     volumeMounts:
@@ -100,17 +100,21 @@ spec:
     - name: PYTORCH_CUDA_ALLOC_CONF
       value: "expandable_segments:True"
 
-  tolerations:
-    - key: nautilus.io/reservation
-      operator: Exists
-      effect: NoSchedule
-    - effect: NoSchedule
-      key: nautilus.io/hardware
-      operator: Equal
-      value: large-gpu
-    - effect: PreferNoSchedule
-      key: nvidia.com/gpu
-      operator: Exists
+  # tolerations:
+  #   - key: nautilus.io/reservation
+  #     operator: Exists
+  #     effect: NoSchedule
+  #   - effect: NoSchedule
+  #     key: nautilus.io/hardware
+  #     operator: Equal
+  #     value: large-gpu
+  #   - effect: PreferNoSchedule
+  #     key: nvidia.com/gpu
+  #     operator: Exists
+  #   # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
+  #   - key: nautilus.io/issue
+  #     operator: Exists
+  #     effect: NoSchedule
 
   # affinity:
   #   nodeAffinity:
@@ -120,7 +124,7 @@ spec:
   #         - key: nvidia.com/gpu.product
   #           operator: In
   #           values:
-  #           - NVIDIA-A100-SXM4-80GB
+  #           - NVIDIA-RTX-A6000
 
   volumes:
     - name: cache-volume

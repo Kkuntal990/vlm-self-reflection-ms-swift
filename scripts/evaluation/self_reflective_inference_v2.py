@@ -229,16 +229,19 @@ class SelfReflectionEngine:
         )
         inputs = inputs.to(self.device)
 
-        # Generate
+        # Generate (use greedy decoding when temperature <= 0)
+        use_sampling = do_sample and temperature > 0
+        gen_kwargs = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": use_sampling,
+            "pad_token_id": self.processor.tokenizer.pad_token_id,
+        }
+        if use_sampling:
+            gen_kwargs["temperature"] = temperature
+            gen_kwargs["top_p"] = top_p
+
         with torch.no_grad():
-            generated_ids = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                do_sample=do_sample,
-                pad_token_id=self.processor.tokenizer.pad_token_id,
-            )
+            generated_ids = self.model.generate(**inputs, **gen_kwargs)
 
         # Decode only the generated part
         input_len = inputs["input_ids"].shape[1]
@@ -253,12 +256,15 @@ class SelfReflectionEngine:
 # ============================================
 
 
-def load_dataset(dataset_path: str, max_samples: int = 0) -> list[dict]:
+def load_dataset(
+    dataset_path: str, max_samples: int = 0, start_index: int = 0
+) -> list[dict]:
     """Load dataset in Messages format.
 
     Args:
         dataset_path: Path to JSONL file
         max_samples: Maximum samples to load (0 = all)
+        start_index: Index of first sample to include (skip earlier samples)
 
     Returns:
         List of sample dictionaries
@@ -267,7 +273,9 @@ def load_dataset(dataset_path: str, max_samples: int = 0) -> list[dict]:
 
     with open(dataset_path) as f:
         for i, line in enumerate(f):
-            if max_samples > 0 and i >= max_samples:
+            if i < start_index:
+                continue
+            if max_samples > 0 and len(samples) >= max_samples:
                 break
             try:
                 sample = json.loads(line.strip())
@@ -275,7 +283,10 @@ def load_dataset(dataset_path: str, max_samples: int = 0) -> list[dict]:
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse line {i}: {e}")
 
-    logger.info(f"Loaded {len(samples)} samples from {dataset_path}")
+    logger.info(
+        f"Loaded {len(samples)} samples from {dataset_path} "
+        f"(start_index={start_index})"
+    )
     return samples
 
 
@@ -375,7 +386,8 @@ def generate_self_reflective_dialogue(
         SampleResult with generated dialogue, or None if failed
     """
     max_new_tokens = generation_config.get("max_new_tokens", 512)
-    temperature = generation_config.get("temperature", 0.7)
+    answer_temperature = generation_config.get("answer_temperature", 0.7)
+    feedback_temperature = generation_config.get("feedback_temperature", 0.7)
     top_p = generation_config.get("top_p", 0.9)
 
     # Parse sample
@@ -444,7 +456,7 @@ def generate_self_reflective_dialogue(
                 messages=refinement_history,
                 system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature,
+                temperature=answer_temperature,
                 top_p=top_p,
             )
 
@@ -486,7 +498,7 @@ def generate_self_reflective_dialogue(
                 messages=critic_history,  # Uses accumulated history
                 system_prompt=FEEDBACK_CRITIC_SYSTEM_PROMPT,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature,
+                temperature=feedback_temperature,
                 top_p=top_p,
             )
 
@@ -522,7 +534,7 @@ def generate_self_reflective_dialogue(
                 messages=refinement_history,
                 system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature,
+                temperature=answer_temperature,
                 top_p=top_p,
             )
 
@@ -598,6 +610,12 @@ def parse_args():
         default=0,
         help="Maximum samples to process (0 = all)",
     )
+    parser.add_argument(
+        "--start_index",
+        type=int,
+        default=0,
+        help="Index of first sample to process (skip earlier samples)",
+    )
 
     # Generation configuration
     parser.add_argument(
@@ -610,7 +628,13 @@ def parse_args():
         "--temperature",
         type=float,
         default=0.4,
-        help="Sampling temperature (lower = less hallucination)",
+        help="Sampling temperature for answer generation (lower = less hallucination)",
+    )
+    parser.add_argument(
+        "--feedback_temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature for feedback generation (defaults to --temperature)",
     )
     parser.add_argument(
         "--top_p",
@@ -648,12 +672,14 @@ def main():
     )
 
     # Load dataset
-    samples = load_dataset(args.dataset_path, args.max_samples)
+    samples = load_dataset(args.dataset_path, args.max_samples, args.start_index)
 
     # Generation config
+    feedback_temp = args.feedback_temperature if args.feedback_temperature is not None else args.temperature
     gen_config = {
         "max_new_tokens": args.max_new_tokens,
-        "temperature": args.temperature,
+        "answer_temperature": args.temperature,
+        "feedback_temperature": feedback_temp,
         "top_p": args.top_p,
     }
 
@@ -665,7 +691,7 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w") as f:
-        for i, sample in enumerate(tqdm(samples, desc="Self-reflective inference (v2)")):
+        for i, sample in enumerate(tqdm(samples, desc="Self-reflective inference (v2)"), start=args.start_index):
             try:
                 result = generate_self_reflective_dialogue(
                     engine=engine,

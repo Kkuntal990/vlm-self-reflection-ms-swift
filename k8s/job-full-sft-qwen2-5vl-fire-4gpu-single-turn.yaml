@@ -58,13 +58,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "5"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/a100: "3"
+            memory: "96Gi"
+            cpu: "6"
           limits:
-            nvidia.com/a100: "5"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/a100: "3"
+            memory: "96Gi"
+            cpu: "6"
 
         volumeMounts:
         - name: cache-volume
@@ -117,7 +117,7 @@ spec:
         - name: BATCH
           value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
-          value: "16"           # Gradient accumulation steps
+          value: "8"           # Gradient accumulation steps
         - name: EPOCHS
           value: "1"           # Number of training epochs
         - name: LR
@@ -133,7 +133,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "5"           # Number of GPUs
+          value: "3"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -170,9 +170,9 @@ spec:
         - effect: PreferNoSchedule
           key: nvidia.com/gpu
           operator: Exists
-        # - key: nautilus.io/reservation
-        #   operator: Exists
-        #   effect: NoSchedule
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
         # # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
         # - key: nautilus.io/issue
         #   operator: Exists
