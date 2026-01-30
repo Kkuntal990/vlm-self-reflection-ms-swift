@@ -273,7 +273,13 @@ run_lmms_eval() {
 
     if ! python -c "import lmms_eval" 2>/dev/null; then
         echo "Installing lmms-eval..."
-        pip install git+https://github.com/EvolvingLMMs-Lab/lmms-eval.git
+        # Must clone and install in editable mode so task YAML configs are included.
+        # pip install from git URL does NOT include the YAML task definitions.
+        local lmms_eval_dir="/tmp/lmms-eval"
+        if [ ! -d "${lmms_eval_dir}" ]; then
+            git clone https://github.com/EvolvingLMMs-Lab/lmms-eval.git "${lmms_eval_dir}"
+        fi
+        pip install -e "${lmms_eval_dir}"
     fi
 
     echo ""
@@ -290,7 +296,7 @@ run_lmms_eval() {
         cmd="python -m lmms_eval"
     fi
 
-    cmd="${cmd} --model qwen2_5_vl_chat"
+    cmd="${cmd} --model qwen2_5_vl"
     cmd="${cmd} --model_args ${model_args}"
     cmd="${cmd} --tasks ${RESOLVED_BENCHMARKS}"
     cmd="${cmd} --batch_size 1"
