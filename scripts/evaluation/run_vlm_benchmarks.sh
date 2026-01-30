@@ -164,13 +164,14 @@ echo "Benchmarks:  ${BENCHMARKS}"
 echo "Limit:       ${LIMIT} (0 = all)"
 echo ""
 
-# Verify model path
-if [ ! -d "${MODEL_PATH}" ]; then
-    echo "ERROR: Model checkpoint directory not found: ${MODEL_PATH}"
-    exit 1
+# Verify model path (supports both local dirs and HuggingFace model IDs)
+if [ -d "${MODEL_PATH}" ]; then
+    echo "Local model checkpoint found:"
+    ls -lh "${MODEL_PATH}/config.json" 2>/dev/null || echo "  (no config.json)"
+else
+    echo "MODEL_PATH is not a local directory: ${MODEL_PATH}"
+    echo "Treating as HuggingFace model ID (will download at runtime)..."
 fi
-echo "Model checkpoint found:"
-ls -lh "${MODEL_PATH}/config.json" 2>/dev/null || echo "  (no config.json, may be HF model ID)"
 echo ""
 
 # Verify GPU

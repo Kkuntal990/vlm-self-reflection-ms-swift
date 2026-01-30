@@ -52,6 +52,9 @@ outputs/
 cache/
 test_fire_local/
 
+# Evaluation results (copied from pods)
+eval/
+
 # Downloaded datasets and preprocessed data
 data/
 

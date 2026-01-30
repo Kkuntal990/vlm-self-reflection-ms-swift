@@ -114,11 +114,11 @@ spec:
 
         # Model and dataset paths
         - name: MODEL_PATH
-          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_results_all_prompt-v2.jsonl"
+          value: "/outputs/inference_v4/self_reflective_feedback_single_turn_results_all_prompt-v2.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -126,7 +126,7 @@ spec:
         - name: START_INDEX
           value: "0"
         - name: MAX_SAMPLES
-          value: "0"
+          value: "500"
 
         # Generation parameters
         - name: TEMPERATURE

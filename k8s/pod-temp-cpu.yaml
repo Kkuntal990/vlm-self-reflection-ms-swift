@@ -18,15 +18,10 @@ spec:
         cpu: "1"
 
     volumeMounts:
-      - name: cache-volume
-        mountPath: /cache
       - name: outputs-volume
         mountPath: /outputs
 
   volumes:
-    - name: cache-volume
-      persistentVolumeClaim:
-        claimName: ms-swift-cache-pvc
     - name: outputs-volume
       persistentVolumeClaim:
         claimName: ms-swift-outputs-pvc
