@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(kubectl cp:*)"
+      "Bash(kubectl cp:*)",
+      "WebSearch",
+      "WebFetch",
+      "WebFetch(*)",
+      "WebFetch(domain:swift.readthedocs.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(uv run ruff format:*)",
+      "WebFetch(domain:arxiv.org)"
     ]
   }
 }

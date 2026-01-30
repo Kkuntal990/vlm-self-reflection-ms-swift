@@ -53,7 +53,7 @@ BENCHMARK_ALIASES: dict[str, str] = {
     "mmvet": "MM-Vet",
     "ai2d": "AI2D",
     "ocrbench": "OCRBench",
-    "mathvista_mini": "MathVista",
+    "mathvista_testmini": "MathVista",
 }
 
 

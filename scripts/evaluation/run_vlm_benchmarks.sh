@@ -47,7 +47,7 @@ VLMEVALKIT_DIR="/tmp/VLMEvalKit"
 VLMEVALKIT_ALL="MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI"
 
 # lmms-eval benchmark names
-LMMS_EVAL_ALL="mmbench_en_dev,mme,seedbench,mmmu_val,mmvet,ai2d,ocrbench,mathvista_mini"
+LMMS_EVAL_ALL="mmbench_en_dev,mme,seedbench,mmmu_val,mmvet,ai2d,ocrbench,mathvista_testmini"
 
 # Mapping for individual benchmark selection
 declare -A VLMEVALKIT_MAP=(
@@ -69,7 +69,7 @@ declare -A LMMS_EVAL_MAP=(
     ["mmvet"]="mmvet"
     ["ai2d"]="ai2d"
     ["ocrbench"]="ocrbench"
-    ["mathvista"]="mathvista_mini"
+    ["mathvista"]="mathvista_testmini"
 )
 
 # ========================================
