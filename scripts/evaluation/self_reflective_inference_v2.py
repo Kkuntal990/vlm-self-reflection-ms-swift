@@ -73,13 +73,19 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 # System prompt for VL Assistant (from fire_messages training)
-VL_ASSISTANT_SYSTEM_PROMPT = (
+_DEFAULT_VL_ASSISTANT_PROMPT = (
     "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
+)
+VL_ASSISTANT_SYSTEM_PROMPT = os.environ.get(
+    "VL_ASSISTANT_SYSTEM_PROMPT", _DEFAULT_VL_ASSISTANT_PROMPT
 )
 
 # System prompt for Feedback Critic (from fire_feedback training)
-FEEDBACK_CRITIC_SYSTEM_PROMPT = (
+_DEFAULT_FEEDBACK_CRITIC_PROMPT = (
     "You are a helpful assistant that provides constructive feedback on answers to visual questions. Given an image, a question, and an answer, and the conversation history identify what is correct, what is incorrect and provide specific critique based on visual evidence."
+)
+FEEDBACK_CRITIC_SYSTEM_PROMPT = os.environ.get(
+    "FEEDBACK_CRITIC_SYSTEM_PROMPT", _DEFAULT_FEEDBACK_CRITIC_PROMPT
 )
 
 

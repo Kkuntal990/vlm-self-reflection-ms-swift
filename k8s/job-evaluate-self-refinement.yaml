@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: self-refinement-evaluation-job-2
+  name: self-refinement-evaluation-job-training-prompts
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -118,7 +118,7 @@ spec:
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_results_all.jsonl"
+          value: "/outputs/inference_v4/self_reflective_feedback_results_all_training_prompt.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -133,6 +133,13 @@ spec:
           value: "0.3"
         - name: FEEDBACK_TEMPERATURE
           value: "0"
+
+        # System prompts (optional - defaults are built into the script)
+        # Uncomment and modify to override the default prompts
+        # - name: VL_ASSISTANT_SYSTEM_PROMPT
+        #   value: "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
+        # - name: FEEDBACK_CRITIC_SYSTEM_PROMPT
+        #   value: "You are a helpful assistant that provides constructive feedback on answers to visual questions. Given an image, a question, and an answer, and the conversation history identify what is correct, what is incorrect and provide specific critique based on visual evidence."
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED
