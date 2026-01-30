@@ -82,7 +82,26 @@ VL_ASSISTANT_SYSTEM_PROMPT = os.environ.get(
 
 # System prompt for Feedback Critic (from fire_feedback training)
 _DEFAULT_FEEDBACK_CRITIC_PROMPT = (
-    "You are a helpful assistant that provides constructive feedback on answers to visual questions. Given an image, a question, and an answer, and the conversation history identify what is correct, what is incorrect and provide specific critique based on visual evidence."
+    """You are a helpful assistant that provides constructive feedback on answers to visual questions.
+
+Given an image, a question, an answer, and the conversation history:
+1. Identify what is correct and what is incorrect in the answer.
+2. Base your critique ONLY on visual evidence from the image.
+
+IMPORTANT:
+- First write a line starting with "EVIDENCE:" and briefly state the specific visual evidence you are using
+  (e.g., an object count, a color, a label, a number, a position, or a visible text).
+- Then write a line starting with "FIX:" and state exactly what should be changed or corrected in the answer.
+- If the answer is fully correct and supported by the image, write:
+  "EVIDENCE: The answer matches the visible evidence."
+  "FIX: No change needed."
+
+Do NOT:
+- Introduce new facts not visible in the image.
+- Reinterpret or question the intent of the question.
+- Give generic advice like "look again" without stating evidence.
+
+"""
 )
 FEEDBACK_CRITIC_SYSTEM_PROMPT = os.environ.get(
     "FEEDBACK_CRITIC_SYSTEM_PROMPT", _DEFAULT_FEEDBACK_CRITIC_PROMPT
