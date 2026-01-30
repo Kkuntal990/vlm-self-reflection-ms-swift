@@ -145,6 +145,14 @@ export HF_HUB_ETAG_TIMEOUT=60
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
+# Login to HuggingFace if token is available (required for gated datasets)
+if [ -n "${HF_TOKEN:-}" ]; then
+    echo "Logging in to HuggingFace Hub..."
+    huggingface-cli login --token "${HF_TOKEN}" 2>/dev/null || \
+        python -c "import huggingface_hub; huggingface_hub.login(token='${HF_TOKEN}')" 2>/dev/null || \
+        echo "WARNING: HF login failed, some datasets may not be accessible"
+fi
+
 echo "========================================="
 echo "VLM Benchmark Evaluation"
 echo "========================================="
