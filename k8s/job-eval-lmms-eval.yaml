@@ -1,0 +1,157 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eval-lmms-eval-qwen2-5vl-7b
+  labels:
+    app: ms-swift
+    task: benchmark-evaluation
+    framework: lmms-eval
+    model: qwen2-5-vl-7b
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: benchmark-evaluation
+        framework: lmms-eval
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: evaluator
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "lmms-eval Benchmark Evaluation"
+          echo "========================================="
+          echo ""
+          echo "Model Path:  ${MODEL_PATH}"
+          echo "Output Dir:  ${OUTPUT_DIR}"
+          echo "Num GPUs:    ${NUM_GPUS}"
+          echo "Benchmarks:  ${BENCHMARKS}"
+          echo "Limit:       ${LIMIT} (0 = all)"
+          echo ""
+
+          # Verify GPU availability
+          echo "GPU Status:"
+          nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+          echo ""
+
+          # Verify model checkpoint exists
+          if [ ! -d "${MODEL_PATH}" ]; then
+            echo "ERROR: Model checkpoint not found: ${MODEL_PATH}"
+            exit 1
+          fi
+          echo "Model checkpoint found:"
+          ls -lh "${MODEL_PATH}/" | head -5
+          echo ""
+
+          # Create output directory
+          mkdir -p "${OUTPUT_DIR}"
+
+          # Run evaluation using the unified script
+          echo "Starting lmms-eval evaluation..."
+          echo ""
+
+          bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
+            --framework lmms-eval \
+            --model-path "${MODEL_PATH}" \
+            --output-dir "${OUTPUT_DIR}" \
+            --num-gpus "${NUM_GPUS}" \
+            --benchmarks "${BENCHMARKS}" \
+            --limit "${LIMIT}"
+
+          echo ""
+          echo "========================================="
+          echo "lmms-eval Evaluation Complete"
+          echo "========================================="
+          echo "Results saved to: ${OUTPUT_DIR}"
+          ls -lhR "${OUTPUT_DIR}/"
+
+        env:
+        # HuggingFace token
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Cache directories
+        - name: HF_HOME
+          value: "/cache/hf"
+        - name: TRANSFORMERS_CACHE
+          value: "/cache/hf/transformers"
+        - name: HF_DATASETS_CACHE
+          value: "/cache/hf/datasets"
+        - name: TORCH_HOME
+          value: "/cache/torch"
+
+        # Evaluation configuration
+        - name: MODEL_PATH
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
+        - name: OUTPUT_DIR
+          value: "/outputs/benchmark_results/lmms_eval"
+        - name: NUM_GPUS
+          value: "2"
+        - name: BENCHMARKS
+          value: "all"
+        - name: LIMIT
+          value: "0"
+
+        # Python and CUDA settings
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+        resources:
+          requests:
+            nvidia.com/rtxa6000: "2"
+            memory: "16Gi"
+            cpu: "4"
+          limits:
+            nvidia.com/rtxa6000: "2"
+            memory: "16Gi"
+            cpu: "4"
+
+        volumeMounts:
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      tolerations:
+        - effect: NoSchedule
+          key: nautilus.io/hardware
+          operator: Equal
+          value: large-gpu
+        - effect: PreferNoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
+
+      volumes:
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 100Gi
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 4Gi

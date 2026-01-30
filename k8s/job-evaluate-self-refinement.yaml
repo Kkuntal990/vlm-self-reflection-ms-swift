@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: self-refinement-evaluation-job-training-prompts
+  name: self-refinement-evaluation-job-training-prompts-v2
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -118,7 +118,7 @@ spec:
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_results_all_training_prompt.jsonl"
+          value: "/outputs/inference_v4/self_reflective_feedback_results_all_prompt-v2.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
