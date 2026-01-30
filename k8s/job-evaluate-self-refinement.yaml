@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: self-refinement-evaluation-job
+  name: self-refinement-evaluation-job-2
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -143,11 +143,11 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "1"
-            memory: "16Gi"
+            memory: "8Gi"
             cpu: "2"
           limits:
             nvidia.com/rtxa6000: "1"
-            memory: "16Gi"
+            memory: "8Gi"
             cpu: "2"
 
         volumeMounts:
@@ -181,4 +181,4 @@ spec:
       - name: dev-shm
         emptyDir:
           medium: Memory
-          sizeLimit: 32Gi
+          sizeLimit: 4Gi
