@@ -37,6 +37,7 @@ spec:
           echo "Image Base Dir: ${IMAGE_BASE_DIR}"
           echo "Start Index: ${START_INDEX}"
           echo "Max Samples: ${MAX_SAMPLES} (0 = all)"
+          echo "Num Turns: ${NUM_TURNS} (0 = use ground truth)"
           echo "Temperature: ${TEMPERATURE}"
           echo "Feedback Temperature: ${FEEDBACK_TEMPERATURE}"
           echo ""
@@ -82,7 +83,8 @@ spec:
             --temperature ${TEMPERATURE} \
             --feedback_temperature ${FEEDBACK_TEMPERATURE} \
             --start_index ${START_INDEX} \
-            --max_samples ${MAX_SAMPLES}
+            --max_samples ${MAX_SAMPLES} \
+            --num_turns ${NUM_TURNS}
 
           echo ""
           echo "========================================="
@@ -126,7 +128,9 @@ spec:
         - name: START_INDEX
           value: "0"
         - name: MAX_SAMPLES
-          value: "500"
+          value: "0"
+        - name: NUM_TURNS
+          value: "1"
 
         # Generation parameters
         - name: TEMPERATURE

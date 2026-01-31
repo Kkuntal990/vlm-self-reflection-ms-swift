@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: qwen2-5vl-7b-fire-full-sft-feedback-single-turn
+  name: llava-ov-7b-full-sft-feedback-single-turn
 spec:
   backoffLimit: 3
   template:
@@ -9,7 +9,7 @@ spec:
       labels:
         app: ms-swift
         task: fire-full-sft
-        model: qwen2-5-vl-7b
+        model: llava-ov-7b
         gpu: a100
     spec:
       restartPolicy: Never
@@ -58,12 +58,12 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "3"
-            memory: "96Gi"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
             cpu: "6"
           limits:
-            nvidia.com/a100: "3"
-            memory: "96Gi"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
             cpu: "6"
 
         volumeMounts:
@@ -133,7 +133,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "3"           # Number of GPUs
+          value: "4"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -142,7 +142,7 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2"
+          value: "llava-ov-feedback-training-single-turn-data2"
         - name: RESUME_PATH
           value: ""
 

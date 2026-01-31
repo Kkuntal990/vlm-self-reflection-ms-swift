@@ -73,16 +73,13 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 # System prompt for VL Assistant (from fire_messages training)
-_DEFAULT_VL_ASSISTANT_PROMPT = (
-    "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
-)
+_DEFAULT_VL_ASSISTANT_PROMPT = "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
 VL_ASSISTANT_SYSTEM_PROMPT = os.environ.get(
     "VL_ASSISTANT_SYSTEM_PROMPT", _DEFAULT_VL_ASSISTANT_PROMPT
 )
 
 # System prompt for Feedback Critic (from fire_feedback training)
-_DEFAULT_FEEDBACK_CRITIC_PROMPT = (
-    """You are a helpful assistant that provides constructive feedback on answers to visual questions.
+_DEFAULT_FEEDBACK_CRITIC_PROMPT = """You are a helpful assistant that provides constructive feedback on answers to visual questions.
 
 Given an image, a question, an answer, and the conversation history:
 1. Identify what is correct and what is incorrect in the answer.
@@ -102,7 +99,6 @@ Do NOT:
 - Give generic advice like "look again" without stating evidence.
 
 """
-)
 FEEDBACK_CRITIC_SYSTEM_PROMPT = os.environ.get(
     "FEEDBACK_CRITIC_SYSTEM_PROMPT", _DEFAULT_FEEDBACK_CRITIC_PROMPT
 )
@@ -276,9 +272,7 @@ class SelfReflectionEngine:
 # ============================================
 
 
-def load_dataset(
-    dataset_path: str, max_samples: int = 0, start_index: int = 0
-) -> list[dict]:
+def load_dataset(dataset_path: str, max_samples: int = 0, start_index: int = 0) -> list[dict]:
     """Load dataset in Messages format.
 
     Args:
@@ -303,10 +297,7 @@ def load_dataset(
             except json.JSONDecodeError as e:
                 logger.warning(f"Failed to parse line {i}: {e}")
 
-    logger.info(
-        f"Loaded {len(samples)} samples from {dataset_path} "
-        f"(start_index={start_index})"
-    )
+    logger.info(f"Loaded {len(samples)} samples from {dataset_path} (start_index={start_index})")
     return samples
 
 
@@ -409,6 +400,7 @@ def generate_self_reflective_dialogue(
     answer_temperature = generation_config.get("answer_temperature", 0.7)
     feedback_temperature = generation_config.get("feedback_temperature", 0.7)
     top_p = generation_config.get("top_p", 0.9)
+    requested_num_turns = generation_config.get("num_turns", 0)
 
     # Parse sample
     question, gt_responses, images, _ = parse_sample(sample)
@@ -430,7 +422,8 @@ def generate_self_reflective_dialogue(
     if not image_path:
         return None
 
-    num_turns = len(gt_responses)
+    # Use requested num_turns if specified, otherwise fall back to ground truth count
+    num_turns = requested_num_turns if requested_num_turns > 0 else len(gt_responses)
     gt_final_answer = gt_responses[-1]
 
     # Track generated turns and message history
@@ -529,10 +522,7 @@ def generate_self_reflective_dialogue(
             generated_turns[-1]["feedback"] = feedback
 
             # Log the feedback generation
-            full_history.append({
-                "role": "user",
-                "content": f"[FEEDBACK]: {feedback}"
-            })
+            full_history.append({"role": "user", "content": f"[FEEDBACK]: {feedback}"})
 
             # -------------------------------------------------
             # Step 2: Generate refined answer using ACCUMULATED history
@@ -636,6 +626,13 @@ def parse_args():
         default=0,
         help="Index of first sample to process (skip earlier samples)",
     )
+    parser.add_argument(
+        "--num_turns",
+        type=int,
+        default=0,
+        help="Number of turns to generate per sample (0 = use ground truth turn count). "
+        "Turn 1 = question+answer, Turn 2+ = feedback+refined answer.",
+    )
 
     # Generation configuration
     parser.add_argument(
@@ -695,12 +692,15 @@ def main():
     samples = load_dataset(args.dataset_path, args.max_samples, args.start_index)
 
     # Generation config
-    feedback_temp = args.feedback_temperature if args.feedback_temperature is not None else args.temperature
+    feedback_temp = (
+        args.feedback_temperature if args.feedback_temperature is not None else args.temperature
+    )
     gen_config = {
         "max_new_tokens": args.max_new_tokens,
         "answer_temperature": args.temperature,
         "feedback_temperature": feedback_temp,
         "top_p": args.top_p,
+        "num_turns": args.num_turns,
     }
 
     # Process samples
@@ -711,7 +711,9 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w") as f:
-        for i, sample in enumerate(tqdm(samples, desc="Self-reflective inference (v2)"), start=args.start_index):
+        for i, sample in enumerate(
+            tqdm(samples, desc="Self-reflective inference (v2)"), start=args.start_index
+        ):
             try:
                 result = generate_self_reflective_dialogue(
                     engine=engine,
@@ -751,7 +753,7 @@ def main():
         print(f"Num turns: {first.num_turns}")
         for i, turn in enumerate(first.generated_turns):
             print(f"  Turn {i}: {turn['answer'][:80]}...")
-            if turn['feedback']:
+            if turn["feedback"]:
                 print(f"    Feedback: {turn['feedback'][:80]}...")
         print(f"GT final: {first.gt_final_answer[:100]}...")
 
