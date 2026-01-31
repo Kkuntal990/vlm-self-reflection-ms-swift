@@ -178,7 +178,7 @@ swift sft \
     --dataloader_num_workers 4 \
     --dataset_num_proc 4 \
     --save_only_model false \
-    --deepspeed zero2 \
+    --deepspeed zero3 \
     --packing false \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \

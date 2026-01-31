@@ -101,14 +101,14 @@ spec:
 
         # Model configuration
         - name: MODEL_ID
-          value: "Qwen/Qwen2.5-VL-7B-Instruct"
+          value: "llava-hf/llava-onevision-qwen2-7b-ov-hf"
         # - name: DATASET_PATH
         #   value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_feedback_train.jsonl#180000 /outputs/fire_preprocessed_v3/fire_messages_train.jsonl /outputs/fire_preprocessed_v3/fire_last_response_train.jsonl"
 
         - name: MAX_LEN
-          value: "3248"
+          value: "8192"
         - name: IMAGE_MAX_TOKEN_NUM
           value: "2048"
 
