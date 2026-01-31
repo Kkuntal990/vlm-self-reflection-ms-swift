@@ -109,7 +109,7 @@ spec:
 
         #Qwen MAX_LEN: 3124
         - name: MAX_LEN
-          value: "8192"
+          value: "9248"
         - name: IMAGE_MAX_TOKEN_NUM
           value: "2048"
 

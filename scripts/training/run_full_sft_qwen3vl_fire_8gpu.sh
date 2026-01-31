@@ -179,7 +179,7 @@ swift sft \
     --dataset_num_proc 4 \
     --save_only_model false \
     --deepspeed zero3 \
-    --packing true \
+    --packing false \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \
