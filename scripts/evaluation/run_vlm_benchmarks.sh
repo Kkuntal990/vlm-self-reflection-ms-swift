@@ -343,6 +343,12 @@ run_lmms_eval() {
 
     local model_args="pretrained=${MODEL_PATH},device_map=auto,attn_implementation=flash_attention_2"
 
+    # LLaVA-OneVision requires model_name to avoid a broken get_model_name_from_path call.
+    # model_name determines the conversation template; "llava_qwen" is standard for Qwen-based LLaVA-OV.
+    if [ "${MODEL_TYPE}" = "llava_onevision" ]; then
+        model_args="${model_args},model_name=llava_qwen"
+    fi
+
     local cmd=""
     if [ "${NUM_GPUS}" -gt 1 ]; then
         cmd="accelerate launch --num_processes ${NUM_GPUS} --main_process_port 29500 -m lmms_eval"
