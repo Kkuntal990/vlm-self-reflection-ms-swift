@@ -54,6 +54,7 @@ test_fire_local/
 
 # Evaluation results (copied from pods)
 eval/
+inference_v4/
 
 # Downloaded datasets and preprocessed data
 data/

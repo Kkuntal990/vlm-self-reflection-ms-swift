@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: self-refinement-evaluation-job-training-prompts-v2
+  name: self-refinement-evaluation-job-training-prompts-v2-st-turns-4
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -116,11 +116,13 @@ spec:
 
         # Model and dataset paths
         - name: MODEL_PATH
-          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
+          #value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
+          #value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
+          value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_single_turn_results_all_prompt-v2.jsonl"
+          value: "/outputs/inference_v4/self_reflective_feedback_plus_st_llava_t1.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -130,7 +132,7 @@ spec:
         - name: MAX_SAMPLES
           value: "0"
         - name: NUM_TURNS
-          value: "1"
+          value: "4"
 
         # Generation parameters
         - name: TEMPERATURE

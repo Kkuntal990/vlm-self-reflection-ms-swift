@@ -15,12 +15,12 @@ spec:
     resources:
       limits:
         nvidia.com/rtxa6000: "1"
-        memory: "16Gi"
-        cpu: "2"
+        memory: "32Gi"
+        cpu: "4"
       requests:
         nvidia.com/rtxa6000: "1"
-        memory: "16Gi"
-        cpu: "2"
+        memory: "32Gi"
+        cpu: "4"
 
     volumeMounts:
       - name: cache-volume
@@ -53,68 +53,27 @@ spec:
     - name: OUTPUT_DIR
       value: "/outputs"
 
-    # ============================================
-    # EVALUATION CONFIGURATION
-    # ============================================
-
-    # Evaluation mode: "ground_truth" or "generated"
-    - name: EVAL_MODE
-      value: "generated"
-
-    # Test dataset path (ShareGPT format)
-    - name: DATASET_PATH
-      value: "/outputs/fire_preprocessed_v2/fire_sharegpt_test.jsonl"
-
-    # Fine-tuned model checkpoint path
-    # UPDATE THIS to your actual checkpoint path
-    - name: MODEL_PATH
-      value: "/outputs/qwen2_5vl-7b-fire-full-sft/checkpoint-final"
-
-    # Reward model for scoring
-    - name: REWARD_MODEL_ID
-      value: "Skywork/Skywork-VL-Reward-7B"
-
-    # Evaluation parameters
-    - name: MAX_SAMPLES
-      value: "10"  # Start small for testing, set to 0 for all
-    - name: MAX_TURNS
-      value: "3"   # Maximum refinement turns
-    - name: PLATEAU_THRESHOLD
-      value: "0.5"
-
-    # Generation parameters (for generated mode)
-    - name: TEMPERATURE
-      value: "0.7"
-    - name: TOP_P
-      value: "0.9"
-    - name: MAX_NEW_TOKENS
-      value: "512"
-
-    # ============================================
-    # SYSTEM CONFIGURATION
-    # ============================================
-
     # Python and CUDA settings
     - name: PYTHONUNBUFFERED
       value: "1"
     - name: PYTORCH_CUDA_ALLOC_CONF
       value: "expandable_segments:True"
 
-  # tolerations:
-  #   - key: nautilus.io/reservation
-  #     operator: Exists
-  #     effect: NoSchedule
-  #   - effect: NoSchedule
-  #     key: nautilus.io/hardware
-  #     operator: Equal
-  #     value: large-gpu
-  #   - effect: PreferNoSchedule
-  #     key: nvidia.com/gpu
-  #     operator: Exists
-  #   # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
-  #   - key: nautilus.io/issue
-  #     operator: Exists
-  #     effect: NoSchedule
+  tolerations:
+    - key: nautilus.io/reservation
+      operator: Exists
+      effect: NoSchedule
+    - effect: NoSchedule
+      key: nautilus.io/hardware
+      operator: Equal
+      value: large-gpu
+    - effect: PreferNoSchedule
+      key: nvidia.com/gpu
+      operator: Exists
+    # Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
+    - key: nautilus.io/issue
+      operator: Exists
+      effect: NoSchedule
 
   # affinity:
   #   nodeAffinity:
@@ -124,7 +83,7 @@ spec:
   #         - key: nvidia.com/gpu.product
   #           operator: In
   #           values:
-  #           - NVIDIA-RTX-A6000
+  #           - NVIDIA-A100-SXM4-80GB
 
   volumes:
     - name: cache-volume

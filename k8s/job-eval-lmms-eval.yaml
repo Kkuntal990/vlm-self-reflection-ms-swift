@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-lmms-eval-qwen2-5vl-7b-base
+  name: eval-lmms-eval-llava-single-turn-feedback
   labels:
     app: ms-swift
     task: benchmark-evaluation
     framework: lmms-eval
-    model: qwen2-5-vl-7b
+    model: llava-ov
 spec:
   backoffLimit: 2
   template:
@@ -65,6 +65,7 @@ spec:
           bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
             --framework lmms-eval \
             --model-path "${MODEL_PATH}" \
+            --model-type "${MODEL_TYPE}" \
             --output-dir "${OUTPUT_DIR}" \
             --num-gpus "${NUM_GPUS}" \
             --benchmarks "${BENCHMARKS}" \
@@ -98,11 +99,13 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "Qwen/Qwen2.5-VL-7B-Instruct"
+          value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
+        - name: MODEL_TYPE
+          value: "llava_onevision"  # Options: qwen2_5_vl, llava_onevision, llava
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/lmms_eval_base"
         - name: NUM_GPUS
-          value: "6"
+          value: "4"
         - name: BENCHMARKS
           value: "all"
         - name: LIMIT
@@ -116,12 +119,12 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "6"
-            memory: "64Gi"
+            nvidia.com/rtxa6000: "4"
+            memory: "128Gi"
             cpu: "8"
           limits:
-            nvidia.com/rtxa6000: "6"
-            memory: "64Gi"
+            nvidia.com/rtxa6000: "4"
+            memory: "128Gi"
             cpu: "8"
 
         volumeMounts:

@@ -33,6 +33,7 @@ set -euo pipefail
 FRAMEWORK="lmms-eval"
 MODEL_PATH=""
 MODEL_NAME="FireSFT-Qwen2-5-VL-7B"
+MODEL_TYPE=""  # lmms-eval model type: qwen2_5_vl, llava_onevision, llava, etc.
 OUTPUT_DIR="/outputs/benchmark_results"
 NUM_GPUS=2
 BENCHMARKS="all"
@@ -105,6 +106,10 @@ while [[ $# -gt 0 ]]; do
             LIMIT="$2"
             shift 2
             ;;
+        --model-type)
+            MODEL_TYPE="$2"
+            shift 2
+            ;;
         --vlmevalkit-dir)
             VLMEVALKIT_DIR="$2"
             shift 2
@@ -116,6 +121,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --framework        vlmevalkit or lmms-eval (default: lmms-eval)"
             echo "  --model-path       Path to model checkpoint (required)"
             echo "  --model-name       Model name for VLMEvalKit registry (default: FireSFT-Qwen2-5-VL-7B)"
+            echo "  --model-type       lmms-eval model type (default: auto-detect from model path)"
+            echo "                     Options: qwen2_5_vl, llava_onevision, llava, etc."
             echo "  --output-dir       Output directory (default: /outputs/benchmark_results)"
             echo "  --num-gpus         Number of GPUs (default: 2)"
             echo "  --benchmarks       Comma-separated list or 'all' (default: all)"
@@ -153,11 +160,49 @@ if [ -n "${HF_TOKEN:-}" ]; then
         echo "WARNING: HF login failed, some datasets may not be accessible"
 fi
 
+# ========================================
+# Auto-detect Model Type
+# ========================================
+detect_model_type() {
+    local model_path="$1"
+
+    # Check for model type indicators in path or config
+    if [[ "${model_path}" =~ [Ll]lava.*[Oo]ne[Vv]ision ]] || \
+       [[ "${model_path}" =~ llava-ov ]] || \
+       [[ "${model_path}" =~ llava_ov ]]; then
+        echo "llava_onevision"
+    elif [[ "${model_path}" =~ [Ll]lava ]]; then
+        echo "llava"
+    elif [[ "${model_path}" =~ [Qq]wen.*2.*5.*[Vv][Ll] ]] || \
+         [[ "${model_path}" =~ [Qq]wen2.5-VL ]]; then
+        echo "qwen2_5_vl"
+    elif [[ "${model_path}" =~ [Qq]wen.*[Vv][Ll] ]]; then
+        echo "qwen_vl"
+    else
+        # Default fallback - user should specify --model-type
+        echo ""
+    fi
+}
+
+# Auto-detect model type if not specified
+if [ -z "$MODEL_TYPE" ]; then
+    MODEL_TYPE=$(detect_model_type "$MODEL_PATH")
+    if [ -z "$MODEL_TYPE" ]; then
+        echo "WARNING: Could not auto-detect model type from path."
+        echo "         Please specify --model-type (e.g., qwen2_5_vl, llava_onevision, llava)"
+        echo "         Defaulting to 'qwen2_5_vl'"
+        MODEL_TYPE="qwen2_5_vl"
+    else
+        echo "Auto-detected model type: ${MODEL_TYPE}"
+    fi
+fi
+
 echo "========================================="
 echo "VLM Benchmark Evaluation"
 echo "========================================="
 echo "Framework:   ${FRAMEWORK}"
 echo "Model Path:  ${MODEL_PATH}"
+echo "Model Type:  ${MODEL_TYPE}"
 echo "Output Dir:  ${OUTPUT_DIR}"
 echo "Num GPUs:    ${NUM_GPUS}"
 echo "Benchmarks:  ${BENCHMARKS}"
@@ -305,7 +350,7 @@ run_lmms_eval() {
         cmd="python -m lmms_eval"
     fi
 
-    cmd="${cmd} --model qwen2_5_vl"
+    cmd="${cmd} --model ${MODEL_TYPE}"
     cmd="${cmd} --model_args ${model_args}"
     cmd="${cmd} --tasks ${RESOLVED_BENCHMARKS}"
     cmd="${cmd} --batch_size 1"
