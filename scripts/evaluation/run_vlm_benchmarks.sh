@@ -336,6 +336,18 @@ run_lmms_eval() {
         pip install -e "${lmms_eval_dir}"
     fi
 
+    # LLaVA-OneVision requires the llava package (LLaVA-NeXT) for load_pretrained_model
+    if [[ "${MODEL_TYPE}" == llava* ]]; then
+        if ! python -c "import llava" 2>/dev/null; then
+            echo "Installing LLaVA-NeXT (required for ${MODEL_TYPE} model type)..."
+            local llava_dir="/tmp/LLaVA-NeXT"
+            if [ ! -d "${llava_dir}" ]; then
+                git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git "${llava_dir}"
+            fi
+            pip install -e "${llava_dir}"
+        fi
+    fi
+
     echo ""
     echo "========================================="
     echo "Running lmms-eval Evaluation"
