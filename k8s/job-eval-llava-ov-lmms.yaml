@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-lmms-eval-llava-single-turn-feedback
+  name: eval-llava-ov-lmms-single-turn-feedback
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -30,7 +30,7 @@ spec:
           set -euo pipefail
 
           echo "========================================="
-          echo "lmms-eval Benchmark Evaluation"
+          echo "LLaVA-OV lmms-eval Benchmark Evaluation"
           echo "========================================="
           echo ""
           echo "Model Path:  ${MODEL_PATH}"
@@ -45,7 +45,7 @@ spec:
           nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
           echo ""
 
-          # Verify model path (local dir or HuggingFace model ID)
+          # Verify model path
           if [ -d "${MODEL_PATH}" ]; then
             echo "Local model checkpoint found:"
             ls -lh "${MODEL_PATH}/" | head -5
@@ -58,12 +58,11 @@ spec:
           # Create output directory
           mkdir -p "${OUTPUT_DIR}"
 
-          # Run evaluation using the unified script
-          echo "Starting lmms-eval evaluation..."
+          # Run evaluation using the dedicated LLaVA-OV script
+          echo "Starting LLaVA-OV evaluation..."
           echo ""
 
-          bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
-            --framework lmms-eval \
+          bash /workspace/scripts/evaluation/run_llava_ov_benchmarks.sh \
             --model-path "${MODEL_PATH}" \
             --output-dir "${OUTPUT_DIR}" \
             --num-gpus "${NUM_GPUS}" \
@@ -72,7 +71,7 @@ spec:
 
           echo ""
           echo "========================================="
-          echo "lmms-eval Evaluation Complete"
+          echo "LLaVA-OV Evaluation Complete"
           echo "========================================="
           echo "Results saved to: ${OUTPUT_DIR}"
           ls -lhR "${OUTPUT_DIR}/"
@@ -100,7 +99,7 @@ spec:
         - name: MODEL_PATH
           value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/lmms_eval_base"
+          value: "/outputs/benchmark_results/llava_ov_lmms_eval"
         - name: NUM_GPUS
           value: "4"
         - name: BENCHMARKS

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-training-prompt-v2-st-llavaov-turns-2
+  name: eval-job-training-prompt-v2-st-qwenprompv1-turns-2
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -117,12 +117,13 @@ spec:
         # Model and dataset paths
         - name: MODEL_PATH
           #value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
-          #value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
-          value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
+          #value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
+          #value: "Qwen/Qwen2.5-VL-7B-Instruct" 
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_plus_st_llava_t2.jsonl"
+          value: "/outputs/inference_v4/self_reflective_feedback_plus_st_qwen_promptv1_t2.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -144,8 +145,8 @@ spec:
         # Uncomment and modify to override the default prompts
         # - name: VL_ASSISTANT_SYSTEM_PROMPT
         #   value: "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
-        # - name: FEEDBACK_CRITIC_SYSTEM_PROMPT
-        #   value: ""
+        - name: FEEDBACK_CRITIC_SYSTEM_PROMPT
+          value: "You are a helpful assistant that provides constructive feedback on answers to visual questions. Given an image, a question, and an answer, and the conversation history identify what is correct, what is incorrect and provide specific critique based on visual evidence."
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED
