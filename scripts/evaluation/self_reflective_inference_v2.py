@@ -423,6 +423,10 @@ class SelfReflectionEngine:
         - {"type": "image", "image": "/path"} -> {"type": "image"} placeholder
         - PIL images collected and passed to processor separately
 
+        Images in non-user messages (e.g. assistant role from role-flipped critic
+        history) are hoisted into the system message. LLaVA base models only
+        reliably process images in user/system turns.
+
         Args:
             messages: Messages in Qwen format (translated internally)
             system_prompt: System prompt
@@ -438,10 +442,45 @@ class SelfReflectionEngine:
 
         # LLaVA-OneVision's chat template silently drops plain string content.
         # All content must be wrapped as [{"type": "text", "text": "..."}] lists.
-        llava_messages = [{"role": "system", "content": [{"type": "text", "text": system_prompt}]}]
         pil_images = []
 
+        # First pass: extract images from non-user messages (e.g. assistant role
+        # in role-flipped critic history). LLaVA base models don't reliably
+        # process images in assistant turns, so hoist them to the system message.
+        hoisted_image_items = []
+        cleaned_messages = []
         for msg in messages:
+            content = msg.get("content")
+            role = msg.get("role", "user")
+
+            if isinstance(content, list) and role != "user":
+                non_image_items = []
+                for item in content:
+                    if item.get("type") == "image" and "image" in item:
+                        hoisted_image_items.append(item)
+                    else:
+                        non_image_items.append(item)
+                cleaned_messages.append({"role": role, "content": non_image_items or content})
+            else:
+                cleaned_messages.append(msg)
+
+        # Build system message: hoisted images first, then system prompt text
+        system_content = []
+        for item in hoisted_image_items:
+            image_path = item["image"]
+            try:
+                pil_image = Image.open(image_path)
+                if pil_image.mode != "RGB":
+                    pil_image = pil_image.convert("RGB")
+                pil_images.append(pil_image)
+                system_content.append({"type": "image"})
+            except Exception as e:
+                logger.warning(f"Failed to load hoisted image {image_path}: {e}")
+        system_content.append({"type": "text", "text": system_prompt})
+        llava_messages = [{"role": "system", "content": system_content}]
+
+        # Second pass: process remaining messages, loading user-role images normally
+        for msg in cleaned_messages:
             content = msg.get("content")
             role = msg.get("role", "user")
 

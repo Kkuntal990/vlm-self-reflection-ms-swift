@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: self-refinement-evaluation-job-training-prompts-v2-st-turns-4
+  name: eval-job-training-prompt-v2-st-llavaov-turns-2
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -122,7 +122,7 @@ spec:
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_plus_st_llava_t1.jsonl"
+          value: "/outputs/inference_v4/self_reflective_feedback_plus_st_llava_t2.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -132,7 +132,7 @@ spec:
         - name: MAX_SAMPLES
           value: "0"
         - name: NUM_TURNS
-          value: "4"
+          value: "2"
 
         # Generation parameters
         - name: TEMPERATURE
