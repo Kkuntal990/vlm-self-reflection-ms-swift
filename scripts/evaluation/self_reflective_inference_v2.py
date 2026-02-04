@@ -52,6 +52,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -105,6 +106,79 @@ FEEDBACK_CRITIC_SYSTEM_PROMPT = os.environ.get(
 
 
 # ============================================
+# Model Type Detection
+# ============================================
+
+MODEL_TYPE_QWEN2_5_VL = "qwen2_5_vl"
+MODEL_TYPE_LLAVA_ONEVISION = "llava_onevision"
+SUPPORTED_MODEL_TYPES = [MODEL_TYPE_QWEN2_5_VL, MODEL_TYPE_LLAVA_ONEVISION]
+
+
+def detect_model_type(model_path: str, model_type_override: str | None = None) -> str:
+    """Detect model type from config, path heuristics, or explicit override.
+
+    Detection priority:
+        1. Explicit override via --model_type CLI argument
+        2. config.json architectures field (reliable for local checkpoints)
+        3. Path-based heuristics (fallback for HuggingFace IDs)
+
+    Args:
+        model_path: Path to model checkpoint or HuggingFace model ID
+        model_type_override: Explicit model type from CLI
+
+    Returns:
+        Detected model type string
+
+    Raises:
+        ValueError: If model_type_override is not a supported type
+    """
+    # Priority 1: Explicit override
+    if model_type_override:
+        if model_type_override not in SUPPORTED_MODEL_TYPES:
+            raise ValueError(
+                f"Unsupported model type: '{model_type_override}'. "
+                f"Supported: {SUPPORTED_MODEL_TYPES}"
+            )
+        logger.info(f"Using explicit model type: {model_type_override}")
+        return model_type_override
+
+    # Priority 2: config.json architectures field
+    config_path = Path(model_path) / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            architectures = config.get("architectures", [])
+            for arch in architectures:
+                if "LlavaOnevision" in arch:
+                    logger.info(
+                        f"Detected model type from config.json: {MODEL_TYPE_LLAVA_ONEVISION}"
+                    )
+                    return MODEL_TYPE_LLAVA_ONEVISION
+                if "Qwen2_5_VL" in arch or "Qwen2_5VL" in arch:
+                    logger.info(f"Detected model type from config.json: {MODEL_TYPE_QWEN2_5_VL}")
+                    return MODEL_TYPE_QWEN2_5_VL
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to read config.json: {e}")
+
+    # Priority 3: Path-based heuristics
+    path_lower = model_path.lower()
+    if re.search(r"llava.*one.*vision|llava[-_]ov", path_lower):
+        logger.info(f"Detected model type from path: {MODEL_TYPE_LLAVA_ONEVISION}")
+        return MODEL_TYPE_LLAVA_ONEVISION
+    if re.search(r"qwen.*2.*5.*vl", path_lower):
+        logger.info(f"Detected model type from path: {MODEL_TYPE_QWEN2_5_VL}")
+        return MODEL_TYPE_QWEN2_5_VL
+
+    # Default fallback
+    logger.warning(
+        f"Could not auto-detect model type for '{model_path}'. "
+        f"Defaulting to '{MODEL_TYPE_QWEN2_5_VL}'. Use --model_type to specify."
+    )
+    return MODEL_TYPE_QWEN2_5_VL
+
+
+# ============================================
 # Data Classes
 # ============================================
 
@@ -147,16 +221,22 @@ class SampleResult:
 class SelfReflectionEngine:
     """Inference engine for self-reflective generation with role-flipped feedback.
 
+    Supports multiple model architectures:
+        - Qwen2.5-VL: Uses qwen_vl_utils for image processing
+        - LLaVA-OneVision: Uses PIL for image loading
+
     Attributes:
         model_path: Path to the fine-tuned model checkpoint
         model: The loaded model
         processor: The model's processor
         device: Device for inference
+        model_type: Detected model architecture type
     """
 
     def __init__(
         self,
         model_path: str,
+        model_type: str = MODEL_TYPE_QWEN2_5_VL,
         device: str = "cuda",
         dtype: torch.dtype = torch.bfloat16,
         use_flash_attn: bool = True,
@@ -165,27 +245,51 @@ class SelfReflectionEngine:
 
         Args:
             model_path: Path to fine-tuned model checkpoint or HuggingFace ID
+            model_type: Model architecture type ("qwen2_5_vl" or "llava_onevision")
             device: Device to run inference on
             dtype: Model data type
             use_flash_attn: Whether to use flash attention
         """
+        if model_type not in SUPPORTED_MODEL_TYPES:
+            raise ValueError(
+                f"Invalid model_type: '{model_type}'. Supported: {SUPPORTED_MODEL_TYPES}"
+            )
+
         self.model_path = model_path
+        self.model_type = model_type
         self.device = device
         self.dtype = dtype
 
-        logger.info(f"Loading model from {model_path}")
+        logger.info(f"Loading model from {model_path} (type: {model_type})")
 
-        # Lazy imports for heavy ML libraries
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        # Lazy import for processor (works for both model types)
+        from transformers import AutoProcessor
 
-        # Load processor
         self.processor = AutoProcessor.from_pretrained(model_path)
 
-        # Load model with flash attention fallback
+        # Load model class based on type
         attn_impl = "flash_attention_2" if use_flash_attn else "eager"
+        if model_type == MODEL_TYPE_LLAVA_ONEVISION:
+            self._load_llava_onevision(attn_impl, device, dtype)
+        else:
+            self._load_qwen2_5_vl(attn_impl, device, dtype)
+
+        self.model.eval()
+        logger.info(f"Model loaded successfully (type: {model_type})")
+
+    def _load_qwen2_5_vl(self, attn_impl: str, device: str, dtype: torch.dtype) -> None:
+        """Load Qwen2.5-VL model.
+
+        Args:
+            attn_impl: Attention implementation ("flash_attention_2" or "eager")
+            device: Device to load model on
+            dtype: Model data type
+        """
+        from transformers import Qwen2_5_VLForConditionalGeneration
+
         try:
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                model_path,
+                self.model_path,
                 device_map="auto" if device == "cuda" else None,
                 torch_dtype=dtype,
                 attn_implementation=attn_impl,
@@ -193,14 +297,37 @@ class SelfReflectionEngine:
         except Exception as e:
             logger.warning(f"Flash attention failed ({e}), falling back to eager")
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                model_path,
+                self.model_path,
                 device_map="auto" if device == "cuda" else None,
                 torch_dtype=dtype,
                 attn_implementation="eager",
             )
 
-        self.model.eval()
-        logger.info("Model loaded successfully")
+    def _load_llava_onevision(self, attn_impl: str, device: str, dtype: torch.dtype) -> None:
+        """Load LLaVA-OneVision model.
+
+        Args:
+            attn_impl: Attention implementation ("flash_attention_2" or "eager")
+            device: Device to load model on
+            dtype: Model data type
+        """
+        from transformers import LlavaOnevisionForConditionalGeneration
+
+        try:
+            self.model = LlavaOnevisionForConditionalGeneration.from_pretrained(
+                self.model_path,
+                device_map="auto" if device == "cuda" else None,
+                torch_dtype=dtype,
+                attn_implementation=attn_impl,
+            )
+        except Exception as e:
+            logger.warning(f"Flash attention failed ({e}), falling back to eager")
+            self.model = LlavaOnevisionForConditionalGeneration.from_pretrained(
+                self.model_path,
+                device_map="auto" if device == "cuda" else None,
+                torch_dtype=dtype,
+                attn_implementation="eager",
+            )
 
     def generate(
         self,
@@ -213,9 +340,45 @@ class SelfReflectionEngine:
     ) -> str:
         """Generate a response given the message history.
 
+        Handles image processing differently based on model type:
+        - Qwen2.5-VL: Uses qwen_vl_utils.process_vision_info()
+        - LLaVA-OneVision: Uses PIL to load images, passes them to processor
+
         Args:
-            messages: List of messages in chat format (without system prompt)
+            messages: List of messages in chat format (without system prompt).
+                Images referenced as {"type": "image", "image": "/path"} in
+                content lists. Translated to model-specific format internally.
             system_prompt: System prompt to use
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            Generated response text
+        """
+        if self.model_type == MODEL_TYPE_LLAVA_ONEVISION:
+            return self._generate_llava_onevision(
+                messages, system_prompt, max_new_tokens, temperature, top_p, do_sample
+            )
+        return self._generate_qwen2_5_vl(
+            messages, system_prompt, max_new_tokens, temperature, top_p, do_sample
+        )
+
+    def _generate_qwen2_5_vl(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        do_sample: bool,
+    ) -> str:
+        """Generate response using Qwen2.5-VL pipeline.
+
+        Args:
+            messages: Messages with image paths in content dicts
+            system_prompt: System prompt
             max_new_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             top_p: Nucleus sampling probability
@@ -226,11 +389,9 @@ class SelfReflectionEngine:
         """
         from qwen_vl_utils import process_vision_info
 
-        # Build full messages with system prompt
         full_messages = [{"role": "system", "content": system_prompt}]
         full_messages.extend(messages)
 
-        # Process inputs
         text = self.processor.apply_chat_template(
             full_messages, tokenize=False, add_generation_prompt=True
         )
@@ -245,7 +406,108 @@ class SelfReflectionEngine:
         )
         inputs = inputs.to(self.device)
 
-        # Generate (use greedy decoding when temperature <= 0)
+        return self._run_generation(inputs, max_new_tokens, temperature, top_p, do_sample)
+
+    def _generate_llava_onevision(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        do_sample: bool,
+    ) -> str:
+        """Generate response using LLaVA-OneVision pipeline.
+
+        Translates Qwen-format messages to LLaVA format:
+        - {"type": "image", "image": "/path"} -> {"type": "image"} placeholder
+        - PIL images collected and passed to processor separately
+
+        Args:
+            messages: Messages in Qwen format (translated internally)
+            system_prompt: System prompt
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            Generated response text
+        """
+        from PIL import Image
+
+        # LLaVA-OneVision's chat template silently drops plain string content.
+        # All content must be wrapped as [{"type": "text", "text": "..."}] lists.
+        llava_messages = [{"role": "system", "content": [{"type": "text", "text": system_prompt}]}]
+        pil_images = []
+
+        for msg in messages:
+            content = msg.get("content")
+            role = msg.get("role", "user")
+
+            if isinstance(content, list):
+                new_content = []
+                for item in content:
+                    if item.get("type") == "image" and "image" in item:
+                        image_path = item["image"]
+                        try:
+                            pil_image = Image.open(image_path)
+                            if pil_image.mode != "RGB":
+                                pil_image = pil_image.convert("RGB")
+                            pil_images.append(pil_image)
+                            new_content.append({"type": "image"})
+                        except Exception as e:
+                            logger.warning(f"Failed to load image {image_path}: {e}")
+                    else:
+                        new_content.append(item)
+                llava_messages.append({"role": role, "content": new_content})
+            else:
+                # Wrap plain text as structured content for LLaVA template
+                llava_messages.append(
+                    {"role": role, "content": [{"type": "text", "text": content}]}
+                )
+
+        text = self.processor.apply_chat_template(
+            llava_messages, tokenize=False, add_generation_prompt=True
+        )
+
+        if pil_images:
+            inputs = self.processor(
+                text=[text],
+                images=pil_images,
+                padding=True,
+                return_tensors="pt",
+            )
+        else:
+            inputs = self.processor(
+                text=[text],
+                padding=True,
+                return_tensors="pt",
+            )
+        inputs = inputs.to(self.device)
+
+        return self._run_generation(inputs, max_new_tokens, temperature, top_p, do_sample)
+
+    def _run_generation(
+        self,
+        inputs: dict,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        do_sample: bool,
+    ) -> str:
+        """Run model generation and decode output.
+
+        Args:
+            inputs: Tokenized and processed model inputs
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            Decoded response text
+        """
         use_sampling = do_sample and temperature > 0
         gen_kwargs = {
             "max_new_tokens": max_new_tokens,
@@ -259,7 +521,6 @@ class SelfReflectionEngine:
         with torch.no_grad():
             generated_ids = self.model.generate(**inputs, **gen_kwargs)
 
-        # Decode only the generated part
         input_len = inputs["input_ids"].shape[1]
         generated_ids = generated_ids[:, input_len:]
         response = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
@@ -673,6 +934,14 @@ def parse_args():
         action="store_true",
         help="Disable flash attention",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default=None,
+        choices=SUPPORTED_MODEL_TYPES,
+        help="Model architecture type. Auto-detected from config.json or path if not specified. "
+        f"Options: {', '.join(SUPPORTED_MODEL_TYPES)}",
+    )
 
     return parser.parse_args()
 
@@ -681,9 +950,13 @@ def main():
     """Main function for self-reflective inference with role-flipped feedback."""
     args = parse_args()
 
+    # Detect model type
+    model_type = detect_model_type(args.model_path, args.model_type)
+
     # Initialize engine
     engine = SelfReflectionEngine(
         model_path=args.model_path,
+        model_type=model_type,
         device=args.device,
         use_flash_attn=not args.no_flash_attn,
     )

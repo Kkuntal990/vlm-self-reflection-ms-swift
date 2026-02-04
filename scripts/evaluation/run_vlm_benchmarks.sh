@@ -167,13 +167,7 @@ detect_model_type() {
     local model_path="$1"
 
     # Check for model type indicators in path or config
-    if [[ "${model_path}" =~ [Ll]lava.*[Oo]ne[Vv]ision ]] || \
-       [[ "${model_path}" =~ llava-ov ]] || \
-       [[ "${model_path}" =~ llava_ov ]]; then
-        echo "llava_onevision"
-    elif [[ "${model_path}" =~ [Ll]lava ]]; then
-        echo "llava"
-    elif [[ "${model_path}" =~ [Qq]wen.*2.*5.*[Vv][Ll] ]] || \
+    if [[ "${model_path}" =~ [Qq]wen.*2.*5.*[Vv][Ll] ]] || \
          [[ "${model_path}" =~ [Qq]wen2.5-VL ]]; then
         echo "qwen2_5_vl"
     elif [[ "${model_path}" =~ [Qq]wen.*[Vv][Ll] ]]; then
@@ -336,30 +330,12 @@ run_lmms_eval() {
         pip install -e "${lmms_eval_dir}"
     fi
 
-    # LLaVA-OneVision requires the llava package (LLaVA-NeXT) for load_pretrained_model
-    if [[ "${MODEL_TYPE}" == llava* ]]; then
-        if ! python -c "import llava" 2>/dev/null; then
-            echo "Installing LLaVA-NeXT (required for ${MODEL_TYPE} model type)..."
-            local llava_dir="/tmp/LLaVA-NeXT"
-            if [ ! -d "${llava_dir}" ]; then
-                git clone https://github.com/LLaVA-VL/LLaVA-NeXT.git "${llava_dir}"
-            fi
-            pip install -e "${llava_dir}"
-        fi
-    fi
-
     echo ""
     echo "========================================="
     echo "Running lmms-eval Evaluation"
     echo "========================================="
 
     local model_args="pretrained=${MODEL_PATH},device_map=auto,attn_implementation=flash_attention_2"
-
-    # LLaVA-OneVision requires model_name to avoid a broken get_model_name_from_path call.
-    # model_name determines the conversation template; "llava_qwen" is standard for Qwen-based LLaVA-OV.
-    if [ "${MODEL_TYPE}" = "llava_onevision" ]; then
-        model_args="${model_args},model_name=llava_qwen"
-    fi
 
     local cmd=""
     if [ "${NUM_GPUS}" -gt 1 ]; then
