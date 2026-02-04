@@ -14,11 +14,11 @@ spec:
 
     resources:
       limits:
-        nvidia.com/rtxa6000: "1"
+        nvidia.com/rtxa6000: "2"
         memory: "32Gi"
         cpu: "4"
       requests:
-        nvidia.com/rtxa6000: "1"
+        nvidia.com/rtxa6000: "2"
         memory: "32Gi"
         cpu: "4"
 
@@ -87,8 +87,8 @@ spec:
 
   volumes:
     - name: cache-volume
-      persistentVolumeClaim:
-        claimName: ms-swift-cache-pvc
+      emptyDir:
+        sizeLimit: 100Gi
     - name: outputs-volume
       persistentVolumeClaim:
         claimName: ms-swift-outputs-pvc

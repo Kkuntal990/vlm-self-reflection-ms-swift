@@ -149,8 +149,8 @@ spec:
 
       volumes:
       - name: cache-volume
-        persistentVolumeClaim:
-          claimName: ms-swift-cache-pvc
+        emptyDir:
+          sizeLimit: 200Gi
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc

@@ -203,6 +203,17 @@ class LlavaOVHF(lmms):
         return self._device
 
     @property
+    def input_device(self) -> torch.device:
+        """Device to send input tensors to.
+
+        When using device_map='auto' (pipeline parallelism), inputs must go
+        to the device of the model's first layer, not necessarily cuda:0.
+        """
+        if self.device_map == "auto":
+            return self.model.device
+        return self._device
+
+    @property
     def rank(self) -> int:
         return self._rank
 
@@ -378,7 +389,7 @@ class LlavaOVHF(lmms):
 
             model_inputs = self._image_processor(
                 text=formatted_continuation, images=visuals, return_tensors="pt"
-            ).to(self._device, self.model.dtype)
+            ).to(self.input_device, self.model.dtype)
             labels = model_inputs["input_ids"].clone()
             contxt_id = self._image_processor(text=formatted_contexts, return_tensors="pt")[
                 "input_ids"

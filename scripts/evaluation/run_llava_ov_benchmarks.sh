@@ -1,8 +1,9 @@
 #!/bin/bash
 # run_llava_ov_benchmarks.sh - Evaluation script for LLaVA-OneVision models via lmms-eval
 #
-# Uses HuggingFace transformers directly (LlavaOnevisionForConditionalGeneration + AutoProcessor).
-# Does NOT depend on the LLaVA-NeXT package.
+# Uses the built-in llava_hf model type in lmms-eval, which supports
+# LlavaOnevisionForConditionalGeneration from HuggingFace transformers natively.
+# No custom wrappers or LLaVA-NeXT package needed.
 #
 # Usage:
 #   bash scripts/evaluation/run_llava_ov_benchmarks.sh \
@@ -58,7 +59,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "LLaVA-OneVision Benchmark Evaluation (HF-native)"
+            echo "LLaVA-OneVision Benchmark Evaluation (lmms-eval built-in llava_hf)"
             echo ""
             echo "Usage: bash run_llava_ov_benchmarks.sh [OPTIONS]"
             echo ""
@@ -161,18 +162,18 @@ mkdir -p "${OUTPUT_DIR}"
 # ========================================
 # Build and Run lmms-eval Command
 # ========================================
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EVAL_SCRIPT="${SCRIPT_DIR}/eval_llava_ov_lmms.py"
-
-MODEL_ARGS="pretrained=${MODEL_PATH},device_map=auto,attn_implementation=flash_attention_2"
-
+# Use built-in llava_hf model type which supports LlavaOnevision natively.
+# For multi-GPU: accelerate data parallelism (no device_map, each process gets own GPU)
+# For single GPU: device_map=auto
 if [ "${NUM_GPUS}" -gt 1 ]; then
-    CMD="accelerate launch --num_processes ${NUM_GPUS} --main_process_port 29500 ${EVAL_SCRIPT}"
+    MODEL_ARGS="pretrained=${MODEL_PATH},attn_implementation=flash_attention_2"
+    CMD="accelerate launch --num_processes ${NUM_GPUS} --main_process_port 29500 -m lmms_eval"
 else
-    CMD="python ${EVAL_SCRIPT}"
+    MODEL_ARGS="pretrained=${MODEL_PATH},device_map=auto,attn_implementation=flash_attention_2"
+    CMD="python -m lmms_eval"
 fi
 
-CMD="${CMD} --model llava_ov_hf"
+CMD="${CMD} --model llava_hf"
 CMD="${CMD} --model_args ${MODEL_ARGS}"
 CMD="${CMD} --tasks ${RESOLVED_BENCHMARKS}"
 CMD="${CMD} --batch_size 1"
@@ -184,7 +185,7 @@ if [ "${LIMIT}" -gt 0 ]; then
 fi
 
 echo "========================================="
-echo "Running lmms-eval with LLaVA-OV HF wrapper"
+echo "Running lmms-eval with built-in llava_hf model"
 echo "========================================="
 echo "Command:"
 echo "  ${CMD}"
