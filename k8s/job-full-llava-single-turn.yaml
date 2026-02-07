@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llava-7b-fire-full-sft-single-response
+  name: llava-7b-fire-full-sft-single-turn
 spec:
   backoffLimit: 3
   template:
@@ -105,7 +105,7 @@ spec:
         # - name: DATASET_PATH
         #   value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
         - name: DATASET_PATH
-          value: "/outputs/fire_preprocessed_v3/fire_feedback_train.jsonl /outputs/fire_preprocessed_v3/fire_messages_train_last_loss_only.jsonl"
+          value: "/outputs/fire_preprocessed_v3/fire_feedback_train_v2.jsonl outputs/fire_preprocessed_v3/fire_last_response_train.jsonl"
 
         #Qwen MAX_LEN: 3124
         - name: MAX_LEN
@@ -147,10 +147,10 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "llava-single-turn-feedback-training"
+          value: "llava-7b-fire-full-sft-single-turn"
         - name: RESUME_PATH
           # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
-          value: ""
+          value: "/outputs/llava-single-turn-feedback-training/v1-20260207-162827/checkpoint-700"
 
         # Logging configuration
         - name: LOGGING_STEPS
@@ -180,9 +180,9 @@ spec:
           operator: Exists
           effect: NoSchedule
         #Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
-        - key: nautilus.io/issue
-          operator: Exists
-          effect: NoSchedule
+        # - key: nautilus.io/issue
+        #   operator: Exists
+        #   effect: NoSchedule
 
       affinity:
         nodeAffinity:
