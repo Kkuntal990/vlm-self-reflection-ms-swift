@@ -154,7 +154,7 @@ swift sft \
     --model "${MODEL_ID}" \
     --train_type full \
     --dataset ${DATASET_PATH} \
-    --split_dataset_ratio 0.1 \
+    --split_dataset_ratio 0.05 \
     --max_length "${MAX_LEN}" \
     --loss_scale "${LOSS_SCALE}" \
     --per_device_train_batch_size "${BATCH}" \
@@ -179,7 +179,7 @@ swift sft \
     --dataset_num_proc 4 \
     --save_only_model false \
     --deepspeed zero3 \
-    --packing true \
+    --packing false \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \
