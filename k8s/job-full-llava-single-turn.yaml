@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llava-7b-fire-full-sft-last-response
+  name: llava-7b-fire-full-sft-single-response
 spec:
   backoffLimit: 3
   template:
@@ -58,13 +58,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "4"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/a100: "2"
+            memory: "96Gi"
+            cpu: "4"
           limits:
-            nvidia.com/a100: "4"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/a100: "2"
+            memory: "96Gi"
+            cpu: "4"
 
         volumeMounts:
         - name: cache-volume
@@ -116,7 +116,7 @@ spec:
 
         # Training hyperparameters (configurable)
         - name: BATCH
-          value: "4"           # Per-GPU batch size (safe with MAX_LEN=3584)
+          value: "8"           # Per-GPU batch size (safe with MAX_LEN=3584)
         - name: GRAD_ACC
           value: "8"           # Gradient accumulation steps
         - name: EPOCHS
@@ -134,11 +134,11 @@ spec:
         - name: DEEPSPEED
           value: "zero2"
         - name: PACKING
-          value: "true"
+          value: "false"
 
         # DDP configuration
         - name: NPROC
-          value: "4"           # Number of GPUs
+          value: "2"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -147,7 +147,7 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "llava-multi-turn-training"
+          value: "llava-single-turn-feedback-training"
         - name: RESUME_PATH
           # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
           value: ""
@@ -158,7 +158,7 @@ spec:
         - name: EVAL_STEPS
           value: "1000"
         - name: SAVE_STEPS
-          value: "500"
+          value: "700"
         - name: SAVE_TOTAL_LIMIT
           value: "2"
 

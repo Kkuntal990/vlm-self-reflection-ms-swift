@@ -97,9 +97,9 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
+          value: "llava-hf/llava-1.5-7b-hf"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/llava_ov_lmms_eval"
+          value: "/outputs/benchmark_results/llava_1_5_lmms_eval"
         - name: NUM_GPUS
           value: "4"
         - name: BENCHMARKS
