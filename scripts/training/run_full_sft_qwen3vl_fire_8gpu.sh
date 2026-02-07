@@ -47,6 +47,8 @@ WARMUP_RATIO="${WARMUP_RATIO:-0.03}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 LOSS_SCALE="${LOSS_SCALE:-last_round}"
+DEEPSPEED="${DEEPSPEED:-zero2}"
+PACKING="${PACKING:-true}"
 # ============================================
 # DDP Configuration
 # ============================================
@@ -178,8 +180,8 @@ swift sft \
     --dataloader_num_workers 4 \
     --dataset_num_proc 4 \
     --save_only_model false \
-    --deepspeed zero2 \
-    --packing true \
+    --deepspeed "${DEEPSPEED}" \
+    --packing "${PACKING}" \
     --dataloader_persistent_workers true \
     --dataloader_prefetch_factor 4 \
     --attn_impl flash_attn \

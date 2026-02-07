@@ -131,6 +131,10 @@ spec:
           value: "1.0"         # Gradient clipping
         - name: LOSS_SCALE
           value: "default"
+        - name: DEEPSPEED
+          value: "zero2"
+        - name: PACKING
+          value: "true"
 
         # DDP configuration
         - name: NPROC
