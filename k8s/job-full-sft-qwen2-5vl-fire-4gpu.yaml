@@ -150,7 +150,7 @@ spec:
 
         # Logging configuration
         - name: LOGGING_STEPS
-          value: "5"
+          value: "10"
         - name: EVAL_STEPS
           value: "1000"
         - name: SAVE_STEPS

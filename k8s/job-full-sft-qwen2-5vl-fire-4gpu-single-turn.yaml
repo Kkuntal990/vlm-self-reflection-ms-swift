@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llava-7b-fire-full-sft-final-and-last-response
+  name: llava-7b-fire-full-sft-single-and-last-response
 spec:
   backoffLimit: 3
   template:
@@ -150,7 +150,7 @@ spec:
 
         # Logging configuration
         - name: LOGGING_STEPS
-          value: "5"
+          value: "10"
         - name: EVAL_STEPS
           value: "1000"
         - name: SAVE_STEPS
