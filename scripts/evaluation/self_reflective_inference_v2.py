@@ -1662,55 +1662,53 @@ def main():
     inference_start = time.time()
 
     if args.batch_size > 1:
-        # Batched processing
+        # Batched processing — write results incrementally to avoid data loss on crash
         logger.info(f"Batch mode: batch_size={args.batch_size}")
         pbar = tqdm(total=len(samples), desc=f"Batched inference (bs={args.batch_size})")
 
-        for chunk_start in range(0, len(samples), args.batch_size):
-            chunk_end = min(chunk_start + args.batch_size, len(samples))
-            chunk_samples = samples[chunk_start:chunk_end]
-            chunk_indices = list(
-                range(
-                    index_offset + chunk_start,
-                    index_offset + chunk_end,
+        with open(rank_output_path, "w") as f:
+            for chunk_start in range(0, len(samples), args.batch_size):
+                chunk_end = min(chunk_start + args.batch_size, len(samples))
+                chunk_samples = samples[chunk_start:chunk_end]
+                chunk_indices = list(
+                    range(
+                        index_offset + chunk_start,
+                        index_offset + chunk_end,
+                    )
                 )
-            )
 
-            try:
-                batch_results = generate_self_reflective_dialogue_batch(
-                    engine=engine,
-                    samples=chunk_samples,
-                    sample_indices=chunk_indices,
-                    image_base_dir=args.image_base_dir,
-                    generation_config=gen_config,
-                    batch_size=args.batch_size,
-                )
-                for result in batch_results:
-                    if result:
-                        results.append(result)
-                    else:
-                        failed += 1
-            except Exception as e:
-                logger.error(f"Failed batch starting at index {chunk_start}: {e}")
-                failed += len(chunk_samples)
+                try:
+                    batch_results = generate_self_reflective_dialogue_batch(
+                        engine=engine,
+                        samples=chunk_samples,
+                        sample_indices=chunk_indices,
+                        image_base_dir=args.image_base_dir,
+                        generation_config=gen_config,
+                        batch_size=args.batch_size,
+                    )
+                    for result in batch_results:
+                        if result:
+                            f.write(json.dumps(result.to_dict()) + "\n")
+                            f.flush()
+                            results.append(result)
+                        else:
+                            failed += 1
+                except Exception as e:
+                    logger.error(f"Failed batch starting at index {chunk_start}: {e}")
+                    failed += len(chunk_samples)
 
-            pbar.update(len(chunk_samples))
-            # Show running per-sample rate in progress bar
-            elapsed = time.time() - inference_start
-            processed = len(results) + failed
-            if processed > 0:
-                pbar.set_postfix(
-                    ok=len(results),
-                    fail=failed,
-                    s_per_sample=f"{elapsed / processed:.1f}",
-                )
+                pbar.update(len(chunk_samples))
+                # Show running per-sample rate in progress bar
+                elapsed = time.time() - inference_start
+                processed = len(results) + failed
+                if processed > 0:
+                    pbar.set_postfix(
+                        ok=len(results),
+                        fail=failed,
+                        s_per_sample=f"{elapsed / processed:.1f}",
+                    )
 
         pbar.close()
-
-        # Write all results
-        with open(rank_output_path, "w") as f:
-            for result in results:
-                f.write(json.dumps(result.to_dict()) + "\n")
     else:
         # Original sequential processing (batch_size=1)
         pbar = tqdm(samples, desc="Sequential inference (bs=1)")
@@ -1727,6 +1725,7 @@ def main():
 
                     if result:
                         f.write(json.dumps(result.to_dict()) + "\n")
+                        f.flush()
                         results.append(result)
                     else:
                         failed += 1
