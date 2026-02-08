@@ -54,6 +54,7 @@ import logging
 import os
 import re
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -80,26 +81,32 @@ VL_ASSISTANT_SYSTEM_PROMPT = os.environ.get(
 )
 
 # System prompt for Feedback Critic (from fire_feedback training)
-_DEFAULT_FEEDBACK_CRITIC_PROMPT = """You are a helpful assistant that provides constructive feedback on answers to visual questions.
+# _DEFAULT_FEEDBACK_CRITIC_PROMPT = """You are a helpful assistant that provides constructive feedback on answers to visual questions.
 
-Given an image, a question, an answer, and the conversation history:
-1. Identify what is correct and what is incorrect in the answer.
-2. Base your critique ONLY on visual evidence from the image.
+# Given an image, a question, an answer, and the conversation history:
+# 1. Identify what is correct and what is incorrect in the answer.
+# 2. Base your critique ONLY on visual evidence from the image.
 
-IMPORTANT:
-- First write a line starting with "EVIDENCE:" and briefly state the specific visual evidence you are using
-  (e.g., an object count, a color, a label, a number, a position, or a visible text).
-- Then write a line starting with "FIX:" and state exactly what should be changed or corrected in the answer.
-- If the answer is fully correct and supported by the image, write:
-  "EVIDENCE: The answer matches the visible evidence."
-  "FIX: No change needed."
+# IMPORTANT:
+# - First write a line starting with "EVIDENCE:" and briefly state the specific visual evidence you are using
+#   (e.g., an object count, a color, a label, a number, a position, or a visible text).
+# - Then write a line starting with "FIX:" and state exactly what should be changed or corrected in the answer.
+# - If the answer is fully correct and supported by the image, write:
+#   "EVIDENCE: The answer matches the visible evidence."
+#   "FIX: No change needed."
 
-Do NOT:
-- Introduce new facts not visible in the image.
-- Reinterpret or question the intent of the question.
-- Give generic advice like "look again" without stating evidence.
+# Do NOT:
+# - Introduce new facts not visible in the image.
+# - Reinterpret or question the intent of the question.
+# - Give generic advice like "look again" without stating evidence.
 
+# """
+
+_DEFAULT_FEEDBACK_CRITIC_PROMPT = """
+You are a vision-language critic that evaluates answers to visual questions and helps improve them. Use the image, question, and dialogue history to judge the latest answer by: - correctness and visual grounding (matches what's visible / implied), - compliance with the requested format (option letter, units, etc.), - completeness. Be conservative: confirm the answer as correct if it is consistent with the image/question and follows the required format. Only say "incorrect" when you can name a specific contradiction or missing requirement. If you are uncertain, do not guess—ask to re-check one concrete detail. Write a brief natural paragraph: start with a clear verdict, give 1–2 grounded reasons, and (if needed) one practical next step. Keep the tone polite and encouraging.
 """
+
+
 FEEDBACK_CRITIC_SYSTEM_PROMPT = os.environ.get(
     "FEEDBACK_CRITIC_SYSTEM_PROMPT", _DEFAULT_FEEDBACK_CRITIC_PROMPT
 )
@@ -111,7 +118,11 @@ FEEDBACK_CRITIC_SYSTEM_PROMPT = os.environ.get(
 
 MODEL_TYPE_QWEN2_5_VL = "qwen2_5_vl"
 MODEL_TYPE_LLAVA_ONEVISION = "llava_onevision"
-SUPPORTED_MODEL_TYPES = [MODEL_TYPE_QWEN2_5_VL, MODEL_TYPE_LLAVA_ONEVISION]
+MODEL_TYPE_LLAVA = "llava"
+SUPPORTED_MODEL_TYPES = [MODEL_TYPE_QWEN2_5_VL, MODEL_TYPE_LLAVA_ONEVISION, MODEL_TYPE_LLAVA]
+
+# LLaVA family types share the same generation pipeline (PIL images + apply_chat_template)
+_LLAVA_FAMILY_TYPES = {MODEL_TYPE_LLAVA_ONEVISION, MODEL_TYPE_LLAVA}
 
 
 def detect_model_type(model_path: str, model_type_override: str | None = None) -> str:
@@ -155,6 +166,11 @@ def detect_model_type(model_path: str, model_type_override: str | None = None) -
                         f"Detected model type from config.json: {MODEL_TYPE_LLAVA_ONEVISION}"
                     )
                     return MODEL_TYPE_LLAVA_ONEVISION
+                if "Llava" in arch:
+                    # Generic LLaVA (e.g. LlavaForConditionalGeneration) — checked
+                    # after LlavaOnevision so OV models match the more specific type
+                    logger.info(f"Detected model type from config.json: {MODEL_TYPE_LLAVA}")
+                    return MODEL_TYPE_LLAVA
                 if "Qwen2_5_VL" in arch or "Qwen2_5VL" in arch:
                     logger.info(f"Detected model type from config.json: {MODEL_TYPE_QWEN2_5_VL}")
                     return MODEL_TYPE_QWEN2_5_VL
@@ -166,6 +182,9 @@ def detect_model_type(model_path: str, model_type_override: str | None = None) -
     if re.search(r"llava.*one.*vision|llava[-_]ov", path_lower):
         logger.info(f"Detected model type from path: {MODEL_TYPE_LLAVA_ONEVISION}")
         return MODEL_TYPE_LLAVA_ONEVISION
+    if re.search(r"llava", path_lower):
+        logger.info(f"Detected model type from path: {MODEL_TYPE_LLAVA}")
+        return MODEL_TYPE_LLAVA
     if re.search(r"qwen.*2.*5.*vl", path_lower):
         logger.info(f"Detected model type from path: {MODEL_TYPE_QWEN2_5_VL}")
         return MODEL_TYPE_QWEN2_5_VL
@@ -246,7 +265,7 @@ class SelfReflectionEngine:
 
         Args:
             model_path: Path to fine-tuned model checkpoint or HuggingFace ID
-            model_type: Model architecture type ("qwen2_5_vl" or "llava_onevision")
+            model_type: Model architecture type ("qwen2_5_vl", "llava_onevision", or "llava")
             device: Device to run inference on (e.g. "cuda", "cuda:0", "cpu")
             dtype: Model data type
             use_flash_attn: Whether to use flash attention
@@ -280,6 +299,8 @@ class SelfReflectionEngine:
         attn_impl = "flash_attention_2" if use_flash_attn else "eager"
         if model_type == MODEL_TYPE_LLAVA_ONEVISION:
             self._load_llava_onevision(attn_impl, device, dtype)
+        elif model_type == MODEL_TYPE_LLAVA:
+            self._load_llava(attn_impl, device, dtype)
         else:
             self._load_qwen2_5_vl(attn_impl, device, dtype)
 
@@ -359,6 +380,36 @@ class SelfReflectionEngine:
                 attn_implementation="eager",
             )
 
+    def _load_llava(self, attn_impl: str, device: str, dtype: torch.dtype) -> None:
+        """Load plain LLaVA model (e.g. LLaVA-1.5, LLaVA-v1.6).
+
+        Uses LlavaForConditionalGeneration. Generation pipeline is identical
+        to LLaVA-OneVision (PIL images + apply_chat_template).
+
+        Args:
+            attn_impl: Attention implementation ("flash_attention_2" or "eager")
+            device: Device to load model on
+            dtype: Model data type
+        """
+        from transformers import LlavaForConditionalGeneration
+
+        dm = self._get_device_map(device)
+        try:
+            self.model = LlavaForConditionalGeneration.from_pretrained(
+                self.model_path,
+                device_map=dm,
+                torch_dtype=dtype,
+                attn_implementation=attn_impl,
+            )
+        except Exception as e:
+            logger.warning(f"Flash attention failed ({e}), falling back to eager")
+            self.model = LlavaForConditionalGeneration.from_pretrained(
+                self.model_path,
+                device_map=dm,
+                torch_dtype=dtype,
+                attn_implementation="eager",
+            )
+
     def generate(
         self,
         messages: list[dict],
@@ -387,7 +438,7 @@ class SelfReflectionEngine:
         Returns:
             Generated response text
         """
-        if self.model_type == MODEL_TYPE_LLAVA_ONEVISION:
+        if self.model_type in _LLAVA_FAMILY_TYPES:
             return self._generate_llava_onevision(
                 messages, system_prompt, max_new_tokens, temperature, top_p, do_sample
             )
@@ -417,7 +468,7 @@ class SelfReflectionEngine:
         Returns:
             List of generated response texts, one per input
         """
-        if self.model_type == MODEL_TYPE_LLAVA_ONEVISION:
+        if self.model_type in _LLAVA_FAMILY_TYPES:
             return self._generate_batch_llava_onevision(
                 messages_list, system_prompt, max_new_tokens, temperature, top_p, do_sample
             )
@@ -1608,10 +1659,13 @@ def main():
     # ---- Process samples ----
     results = []
     failed = 0
+    inference_start = time.time()
 
     if args.batch_size > 1:
         # Batched processing
         logger.info(f"Batch mode: batch_size={args.batch_size}")
+        pbar = tqdm(total=len(samples), desc=f"Batched inference (bs={args.batch_size})")
+
         for chunk_start in range(0, len(samples), args.batch_size):
             chunk_end = min(chunk_start + args.batch_size, len(samples))
             chunk_samples = samples[chunk_start:chunk_end]
@@ -1640,16 +1694,28 @@ def main():
                 logger.error(f"Failed batch starting at index {chunk_start}: {e}")
                 failed += len(chunk_samples)
 
+            pbar.update(len(chunk_samples))
+            # Show running per-sample rate in progress bar
+            elapsed = time.time() - inference_start
+            processed = len(results) + failed
+            if processed > 0:
+                pbar.set_postfix(
+                    ok=len(results),
+                    fail=failed,
+                    s_per_sample=f"{elapsed / processed:.1f}",
+                )
+
+        pbar.close()
+
         # Write all results
         with open(rank_output_path, "w") as f:
             for result in results:
                 f.write(json.dumps(result.to_dict()) + "\n")
     else:
         # Original sequential processing (batch_size=1)
+        pbar = tqdm(samples, desc="Sequential inference (bs=1)")
         with open(rank_output_path, "w") as f:
-            for i, sample in enumerate(
-                tqdm(samples, desc="Self-reflective inference (v2)"), start=index_offset
-            ):
+            for i, sample in enumerate(pbar, start=index_offset):
                 try:
                     result = generate_self_reflective_dialogue(
                         engine=engine,
@@ -1668,6 +1734,18 @@ def main():
                 except Exception as e:
                     logger.error(f"Failed to process sample {i}: {e}")
                     failed += 1
+
+                # Show running per-sample rate
+                elapsed = time.time() - inference_start
+                processed = len(results) + failed
+                if processed > 0:
+                    pbar.set_postfix(
+                        ok=len(results),
+                        fail=failed,
+                        s_per_sample=f"{elapsed / processed:.1f}",
+                    )
+
+    inference_elapsed = time.time() - inference_start
 
     # ---- Merge results from all ranks ----
     if world_size > 1 and accelerator is not None:
@@ -1697,6 +1775,8 @@ def main():
     # ---- Print summary (main process only) ----
     if is_main:
         final_output = output_path if world_size > 1 else rank_output_path
+        total_processed = len(results) + failed
+
         print("\n" + "=" * 60)
         print("SELF-REFLECTIVE INFERENCE V2 (Role-Flipped) SUMMARY")
         print("=" * 60)
@@ -1708,6 +1788,22 @@ def main():
         if args.batch_size > 1:
             print(f"Batch size: {args.batch_size}")
         print(f"Output saved to: {final_output}")
+
+        # Timing stats
+        print("\n--- Timing ---")
+        minutes, seconds = divmod(inference_elapsed, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours > 0:
+            print(f"Total inference time: {int(hours)}h {int(minutes)}m {seconds:.1f}s")
+        elif minutes > 0:
+            print(f"Total inference time: {int(minutes)}m {seconds:.1f}s")
+        else:
+            print(f"Total inference time: {seconds:.1f}s")
+        if total_processed > 0:
+            per_sample = inference_elapsed / total_processed
+            samples_per_min = 60.0 / per_sample if per_sample > 0 else 0
+            print(f"Per-sample time: {per_sample:.2f}s")
+            print(f"Throughput: {samples_per_min:.1f} samples/min")
 
         if results:
             avg_turns = sum(r.num_turns for r in results) / len(results)

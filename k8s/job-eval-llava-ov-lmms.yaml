@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-llava-ov-lmms-single-turn-feedback
+  name: eval-llava-lmms-multi-turn-feedback
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -97,13 +97,13 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "llava-hf/llava-1.5-7b-hf"
+          value: "/outputs/llava-7b-fire-full-sft-multi-turn/v0-20260208-031444/checkpoint-1485"
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/llava_1_5_lmms_eval"
         - name: NUM_GPUS
           value: "4"
         - name: BENCHMARKS
-          value: "all"
+          value: "ai2d,mme,mmmu_val,ocrbench,seedbench"
         - name: LIMIT
           value: "0"
 
@@ -116,12 +116,12 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "4"
-            memory: "128Gi"
-            cpu: "8"
+            memory: "64Gi"
+            cpu: "4"
           limits:
             nvidia.com/rtxa6000: "4"
-            memory: "128Gi"
-            cpu: "8"
+            memory: "64Gi"
+            cpu: "4"
 
         volumeMounts:
         - name: cache-volume

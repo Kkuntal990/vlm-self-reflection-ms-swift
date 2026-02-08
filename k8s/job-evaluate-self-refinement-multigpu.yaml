@@ -1,11 +1,11 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-self-refinement-multigpu
+  name: eval-job-self-refinement-llava-mt-multigpu
   labels:
     app: ms-swift
     task: self-refinement-evaluation
-    model: qwen2-5-vl-7b
+    model: llava-7b
 spec:
   backoffLimit: 2
   template:
@@ -123,11 +123,11 @@ spec:
 
         # Model and dataset paths
         - name: MODEL_PATH
-          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
+          value: "/outputs/llava-7b-fire-full-sft-multi-turn/v0-20260208-031444/checkpoint-1485"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_multigpu_results.jsonl"
+          value: "/outputs/inference_v5/llava_multi_turn_t2_multi_gpu_test.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -141,7 +141,7 @@ spec:
 
         # Generation parameters
         - name: TEMPERATURE
-          value: "0.3"
+          value: "0.2"
         - name: FEEDBACK_TEMPERATURE
           value: "0"
 
@@ -149,11 +149,7 @@ spec:
         - name: BATCH_SIZE
           value: "4"
         - name: NUM_GPUS
-          value: "2"
-
-        # System prompts
-        - name: FEEDBACK_CRITIC_SYSTEM_PROMPT
-          value: "You are a helpful assistant that provides constructive feedback on answers to visual questions. Given an image, a question, and an answer, and the conversation history identify what is correct, what is incorrect and provide specific critique based on visual evidence."
+          value: "4"
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED
@@ -165,12 +161,12 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "2"
-            memory: "16Gi"
+            nvidia.com/rtxa6000: "4"
+            memory: "32Gi"
             cpu: "4"
           limits:
-            nvidia.com/rtxa6000: "2"
-            memory: "16Gi"
+            nvidia.com/rtxa6000: "4"
+            memory: "32Gi"
             cpu: "4"
 
         volumeMounts:
