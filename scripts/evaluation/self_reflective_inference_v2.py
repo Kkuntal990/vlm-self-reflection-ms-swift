@@ -1747,11 +1747,45 @@ def main():
 
     inference_elapsed = time.time() - inference_start
 
-    # ---- Merge results from all ranks ----
+    # ---- Merge results from all ranks (file-based sync, no NCCL barrier) ----
     if world_size > 1 and accelerator is not None:
-        accelerator.wait_for_everyone()
+        # Each rank writes a .done marker file when finished
+        done_marker = output_path.parent / f"{output_path.stem}_rank{local_rank}.done"
+        done_marker.touch()
+        logger.info(f"Rank {local_rank} finished, wrote marker: {done_marker}")
 
         if is_main:
+            # Poll for all rank marker files instead of using NCCL barrier
+            # This avoids timeout issues when ranks finish at very different times
+            all_done = False
+            poll_interval = 30  # seconds
+            max_wait = 6 * 3600  # 6 hours max wait
+            waited = 0
+
+            while not all_done and waited < max_wait:
+                missing = []
+                for rank in range(world_size):
+                    marker = output_path.parent / f"{output_path.stem}_rank{rank}.done"
+                    if not marker.exists():
+                        missing.append(rank)
+
+                if not missing:
+                    all_done = True
+                else:
+                    logger.info(
+                        f"Waiting for ranks {missing} to finish... "
+                        f"({waited}s elapsed, polling every {poll_interval}s)"
+                    )
+                    time.sleep(poll_interval)
+                    waited += poll_interval
+
+            if not all_done:
+                logger.error(
+                    f"Timed out waiting for all ranks after {max_wait}s. "
+                    "Merging available results."
+                )
+
+            # Merge results
             logger.info("Merging results from all ranks...")
             merged = []
             for rank in range(world_size):
@@ -1763,6 +1797,11 @@ def main():
                         for line in f_in:
                             merged.append(json.loads(line))
                     rank_file.unlink()
+
+                # Clean up marker file
+                marker = output_path.parent / f"{output_path.stem}_rank{rank}.done"
+                if marker.exists():
+                    marker.unlink()
 
             # Sort by sample_index for deterministic output
             merged.sort(key=lambda x: x["sample_index"])

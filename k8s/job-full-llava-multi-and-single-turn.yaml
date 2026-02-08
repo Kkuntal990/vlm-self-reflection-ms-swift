@@ -59,11 +59,11 @@ spec:
         resources:
           requests:
             nvidia.com/a100: "2"
-            memory: "96Gi"
+            memory: "64Gi"
             cpu: "4"
           limits:
             nvidia.com/a100: "2"
-            memory: "96Gi"
+            memory: "80Gi"
             cpu: "4"
 
         volumeMounts:

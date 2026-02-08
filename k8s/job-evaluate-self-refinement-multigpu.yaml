@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-self-refinement-llava-mt-multigpu
+  name: eval-job-self-refinement-llava-st-multigpu-2t
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -123,11 +123,11 @@ spec:
 
         # Model and dataset paths
         - name: MODEL_PATH
-          value: "/outputs/llava-7b-fire-full-sft-multi-turn/v0-20260208-031444/checkpoint-1485"
+          value: "outputs/llava-7b-fire-full-sft-single-turn/v0-20260208-031455/checkpoint-1485"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v5/llava_multi_turn_t2_multi_gpu_test.jsonl"
+          value: "/outputs/inference_v5/llava_single_turn_multi_gpu_t2.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -147,7 +147,7 @@ spec:
 
         # Batch and parallelism (batch_size per GPU)
         - name: BATCH_SIZE
-          value: "4"
+          value: "8"
         - name: NUM_GPUS
           value: "4"
 
@@ -166,7 +166,7 @@ spec:
             cpu: "4"
           limits:
             nvidia.com/rtxa6000: "4"
-            memory: "32Gi"
+            memory: "40Gi"
             cpu: "4"
 
         volumeMounts:
