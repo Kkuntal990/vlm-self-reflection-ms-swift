@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-training-prompt-v2-st-qwenprompv1-turns-2
+  name: eval-job-self-refinement-multigpu
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -28,7 +28,7 @@ spec:
           set -euo pipefail
 
           echo "========================================="
-          echo "Self-Reflective Inference V2 Pipeline"
+          echo "Self-Reflective Inference V2 (Multi-GPU)"
           echo "========================================="
           echo ""
           echo "Model Path: ${MODEL_PATH}"
@@ -40,6 +40,8 @@ spec:
           echo "Num Turns: ${NUM_TURNS} (0 = use ground truth)"
           echo "Temperature: ${TEMPERATURE}"
           echo "Feedback Temperature: ${FEEDBACK_TEMPERATURE}"
+          echo "Batch Size: ${BATCH_SIZE}"
+          echo "Num GPUs: ${NUM_GPUS}"
           echo ""
 
           # Verify GPU availability
@@ -71,11 +73,14 @@ spec:
           # Create output directory
           mkdir -p "$(dirname "${OUTPUT_PATH}")"
 
-          # Run self-reflective inference
-          echo "Starting self-reflective inference..."
+          # Run multi-GPU self-reflective inference
+          echo "Starting multi-GPU inference (${NUM_GPUS} GPUs, batch_size=${BATCH_SIZE})..."
           echo ""
 
-          python /workspace/scripts/evaluation/self_reflective_inference_v2.py \
+          accelerate launch \
+            --num_processes ${NUM_GPUS} \
+            --main_process_port 29501 \
+            /workspace/scripts/evaluation/self_reflective_inference_v2.py \
             --model_path "${MODEL_PATH}" \
             --dataset_path "${DATASET_PATH}" \
             --output_path "${OUTPUT_PATH}" \
@@ -85,7 +90,8 @@ spec:
             --start_index ${START_INDEX} \
             --max_samples ${MAX_SAMPLES} \
             --num_turns ${NUM_TURNS} \
-            --batch_size ${BATCH_SIZE}
+            --batch_size ${BATCH_SIZE} \
+            --multi_gpu
 
           echo ""
           echo "========================================="
@@ -117,14 +123,11 @@ spec:
 
         # Model and dataset paths
         - name: MODEL_PATH
-          #value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
           value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
-          #value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
-          #value: "Qwen/Qwen2.5-VL-7B-Instruct" 
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v4/self_reflective_feedback_plus_st_qwen_promptv1_t2.jsonl"
+          value: "/outputs/inference_v4/self_reflective_multigpu_results.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -142,14 +145,13 @@ spec:
         - name: FEEDBACK_TEMPERATURE
           value: "0"
 
-        # Batch processing (1 = sequential, 2-4 recommended for A6000)
+        # Batch and parallelism (batch_size per GPU)
         - name: BATCH_SIZE
-          value: "1"
+          value: "4"
+        - name: NUM_GPUS
+          value: "2"
 
-        # System prompts (optional - defaults are built into the script)
-        # Uncomment and modify to override the default prompts
-        # - name: VL_ASSISTANT_SYSTEM_PROMPT
-        #   value: "You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user's instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness."
+        # System prompts
         - name: FEEDBACK_CRITIC_SYSTEM_PROMPT
           value: "You are a helpful assistant that provides constructive feedback on answers to visual questions. Given an image, a question, and an answer, and the conversation history identify what is correct, what is incorrect and provide specific critique based on visual evidence."
 
@@ -158,16 +160,18 @@ spec:
           value: "1"
         - name: PYTORCH_CUDA_ALLOC_CONF
           value: "expandable_segments:True"
+        - name: NCCL_DEBUG
+          value: "WARN"
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "1"
-            memory: "8Gi"
-            cpu: "2"
+            nvidia.com/rtxa6000: "2"
+            memory: "16Gi"
+            cpu: "4"
           limits:
-            nvidia.com/rtxa6000: "1"
-            memory: "8Gi"
-            cpu: "2"
+            nvidia.com/rtxa6000: "2"
+            memory: "16Gi"
+            cpu: "4"
 
         volumeMounts:
         - name: outputs-volume
@@ -200,4 +204,4 @@ spec:
       - name: dev-shm
         emptyDir:
           medium: Memory
-          sizeLimit: 4Gi
+          sizeLimit: 8Gi

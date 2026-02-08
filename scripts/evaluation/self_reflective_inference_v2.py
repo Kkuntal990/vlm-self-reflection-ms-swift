@@ -240,15 +240,19 @@ class SelfReflectionEngine:
         device: str = "cuda",
         dtype: torch.dtype = torch.bfloat16,
         use_flash_attn: bool = True,
+        device_map_strategy: str = "auto",
     ):
         """Initialize the inference engine.
 
         Args:
             model_path: Path to fine-tuned model checkpoint or HuggingFace ID
             model_type: Model architecture type ("qwen2_5_vl" or "llava_onevision")
-            device: Device to run inference on
+            device: Device to run inference on (e.g. "cuda", "cuda:0", "cpu")
             dtype: Model data type
             use_flash_attn: Whether to use flash attention
+            device_map_strategy: Model placement strategy:
+                "auto" - use device_map="auto" (single GPU, spreads across devices)
+                "per_gpu" - no device_map, explicitly place on `device` (multi-GPU)
         """
         if model_type not in SUPPORTED_MODEL_TYPES:
             raise ValueError(
@@ -259,13 +263,18 @@ class SelfReflectionEngine:
         self.model_type = model_type
         self.device = device
         self.dtype = dtype
+        self.device_map_strategy = device_map_strategy
 
-        logger.info(f"Loading model from {model_path} (type: {model_type})")
+        logger.info(f"Loading model from {model_path} (type: {model_type}, device: {device})")
 
         # Lazy import for processor (works for both model types)
         from transformers import AutoProcessor
 
         self.processor = AutoProcessor.from_pretrained(model_path)
+
+        # Left-pad for batched generation (decoder-only models need left-padding
+        # so all sequences align at the right/generation end)
+        self.processor.tokenizer.padding_side = "left"
 
         # Load model class based on type
         attn_impl = "flash_attention_2" if use_flash_attn else "eager"
@@ -274,8 +283,27 @@ class SelfReflectionEngine:
         else:
             self._load_qwen2_5_vl(attn_impl, device, dtype)
 
+        # For per_gpu strategy, move model to the specific device
+        if device_map_strategy == "per_gpu":
+            self.model = self.model.to(device)
+
         self.model.eval()
         logger.info(f"Model loaded successfully (type: {model_type})")
+
+    def _get_device_map(self, device: str) -> str | None:
+        """Get the device_map value based on strategy.
+
+        Args:
+            device: Target device string
+
+        Returns:
+            device_map argument for from_pretrained()
+        """
+        if self.device_map_strategy == "per_gpu":
+            # Multi-GPU: no device_map, model placed via .to(device) after loading
+            return None
+        # Single-GPU: use device_map="auto" for CUDA
+        return "auto" if device.startswith("cuda") else None
 
     def _load_qwen2_5_vl(self, attn_impl: str, device: str, dtype: torch.dtype) -> None:
         """Load Qwen2.5-VL model.
@@ -287,10 +315,11 @@ class SelfReflectionEngine:
         """
         from transformers import Qwen2_5_VLForConditionalGeneration
 
+        dm = self._get_device_map(device)
         try:
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 self.model_path,
-                device_map="auto" if device == "cuda" else None,
+                device_map=dm,
                 torch_dtype=dtype,
                 attn_implementation=attn_impl,
             )
@@ -298,7 +327,7 @@ class SelfReflectionEngine:
             logger.warning(f"Flash attention failed ({e}), falling back to eager")
             self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 self.model_path,
-                device_map="auto" if device == "cuda" else None,
+                device_map=dm,
                 torch_dtype=dtype,
                 attn_implementation="eager",
             )
@@ -313,10 +342,11 @@ class SelfReflectionEngine:
         """
         from transformers import LlavaOnevisionForConditionalGeneration
 
+        dm = self._get_device_map(device)
         try:
             self.model = LlavaOnevisionForConditionalGeneration.from_pretrained(
                 self.model_path,
-                device_map="auto" if device == "cuda" else None,
+                device_map=dm,
                 torch_dtype=dtype,
                 attn_implementation=attn_impl,
             )
@@ -324,7 +354,7 @@ class SelfReflectionEngine:
             logger.warning(f"Flash attention failed ({e}), falling back to eager")
             self.model = LlavaOnevisionForConditionalGeneration.from_pretrained(
                 self.model_path,
-                device_map="auto" if device == "cuda" else None,
+                device_map=dm,
                 torch_dtype=dtype,
                 attn_implementation="eager",
             )
@@ -364,6 +394,247 @@ class SelfReflectionEngine:
         return self._generate_qwen2_5_vl(
             messages, system_prompt, max_new_tokens, temperature, top_p, do_sample
         )
+
+    def generate_batch(
+        self,
+        messages_list: list[list[dict]],
+        system_prompt: str,
+        max_new_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        do_sample: bool = True,
+    ) -> list[str]:
+        """Generate responses for multiple prompts in a single forward pass.
+
+        Args:
+            messages_list: List of message histories, one per sample
+            system_prompt: System prompt (shared across batch)
+            max_new_tokens: Maximum tokens to generate per response
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            List of generated response texts, one per input
+        """
+        if self.model_type == MODEL_TYPE_LLAVA_ONEVISION:
+            return self._generate_batch_llava_onevision(
+                messages_list, system_prompt, max_new_tokens, temperature, top_p, do_sample
+            )
+        return self._generate_batch_qwen2_5_vl(
+            messages_list, system_prompt, max_new_tokens, temperature, top_p, do_sample
+        )
+
+    def _generate_batch_qwen2_5_vl(
+        self,
+        messages_list: list[list[dict]],
+        system_prompt: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        do_sample: bool,
+    ) -> list[str]:
+        """Batch generate responses using Qwen2.5-VL pipeline.
+
+        Args:
+            messages_list: List of message histories, one per sample
+            system_prompt: System prompt (shared across batch)
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            List of generated response texts
+        """
+        from qwen_vl_utils import process_vision_info
+
+        texts = []
+        all_image_inputs = []
+        all_video_inputs = []
+
+        for messages in messages_list:
+            full_messages = [{"role": "system", "content": system_prompt}]
+            full_messages.extend(messages)
+
+            text = self.processor.apply_chat_template(
+                full_messages, tokenize=False, add_generation_prompt=True
+            )
+            texts.append(text)
+
+            image_inputs, video_inputs = process_vision_info(full_messages)
+            if image_inputs:
+                all_image_inputs.extend(image_inputs)
+            if video_inputs:
+                all_video_inputs.extend(video_inputs)
+
+        inputs = self.processor(
+            text=texts,
+            images=all_image_inputs if all_image_inputs else None,
+            videos=all_video_inputs if all_video_inputs else None,
+            padding=True,
+            return_tensors="pt",
+        )
+        inputs = inputs.to(self.device)
+
+        return self._run_generation_batch(inputs, max_new_tokens, temperature, top_p, do_sample)
+
+    def _generate_batch_llava_onevision(
+        self,
+        messages_list: list[list[dict]],
+        system_prompt: str,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        do_sample: bool,
+    ) -> list[str]:
+        """Batch generate responses using LLaVA-OneVision pipeline.
+
+        Applies the same message translation as _generate_llava_onevision()
+        (image hoisting, content wrapping) to each sample, then processes
+        all samples in a single forward pass.
+
+        Args:
+            messages_list: List of message histories, one per sample
+            system_prompt: System prompt (shared across batch)
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            List of generated response texts
+        """
+        from PIL import Image
+
+        texts = []
+        all_pil_images = []
+
+        for messages in messages_list:
+            pil_images = []
+
+            # First pass: hoist images from non-user messages to system message
+            hoisted_image_items = []
+            cleaned_messages = []
+            for msg in messages:
+                content = msg.get("content")
+                role = msg.get("role", "user")
+
+                if isinstance(content, list) and role != "user":
+                    non_image_items = []
+                    for item in content:
+                        if item.get("type") == "image" and "image" in item:
+                            hoisted_image_items.append(item)
+                        else:
+                            non_image_items.append(item)
+                    cleaned_messages.append({"role": role, "content": non_image_items or content})
+                else:
+                    cleaned_messages.append(msg)
+
+            # Build system message with hoisted images
+            system_content = []
+            for item in hoisted_image_items:
+                image_path = item["image"]
+                try:
+                    pil_image = Image.open(image_path)
+                    if pil_image.mode != "RGB":
+                        pil_image = pil_image.convert("RGB")
+                    pil_images.append(pil_image)
+                    system_content.append({"type": "image"})
+                except Exception as e:
+                    logger.warning(f"Failed to load hoisted image {image_path}: {e}")
+            system_content.append({"type": "text", "text": system_prompt})
+            llava_messages = [{"role": "system", "content": system_content}]
+
+            # Second pass: process remaining messages
+            for msg in cleaned_messages:
+                content = msg.get("content")
+                role = msg.get("role", "user")
+
+                if isinstance(content, list):
+                    new_content = []
+                    for item in content:
+                        if item.get("type") == "image" and "image" in item:
+                            image_path = item["image"]
+                            try:
+                                pil_image = Image.open(image_path)
+                                if pil_image.mode != "RGB":
+                                    pil_image = pil_image.convert("RGB")
+                                pil_images.append(pil_image)
+                                new_content.append({"type": "image"})
+                            except Exception as e:
+                                logger.warning(f"Failed to load image {image_path}: {e}")
+                        else:
+                            new_content.append(item)
+                    llava_messages.append({"role": role, "content": new_content})
+                else:
+                    llava_messages.append(
+                        {"role": role, "content": [{"type": "text", "text": content}]}
+                    )
+
+            text = self.processor.apply_chat_template(
+                llava_messages, tokenize=False, add_generation_prompt=True
+            )
+            texts.append(text)
+            all_pil_images.extend(pil_images)
+
+        if all_pil_images:
+            inputs = self.processor(
+                text=texts,
+                images=all_pil_images,
+                padding=True,
+                return_tensors="pt",
+            )
+        else:
+            inputs = self.processor(
+                text=texts,
+                padding=True,
+                return_tensors="pt",
+            )
+        inputs = inputs.to(self.device)
+
+        return self._run_generation_batch(inputs, max_new_tokens, temperature, top_p, do_sample)
+
+    def _run_generation_batch(
+        self,
+        inputs: dict,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        do_sample: bool,
+    ) -> list[str]:
+        """Run batched model generation and decode all outputs.
+
+        Args:
+            inputs: Tokenized and processed model inputs (batched)
+            max_new_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Nucleus sampling probability
+            do_sample: Whether to use sampling
+
+        Returns:
+            List of decoded response texts
+        """
+        use_sampling = do_sample and temperature > 0
+        gen_kwargs = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": use_sampling,
+            "pad_token_id": self.processor.tokenizer.pad_token_id,
+        }
+        if use_sampling:
+            gen_kwargs["temperature"] = temperature
+            gen_kwargs["top_p"] = top_p
+
+        with torch.no_grad():
+            generated_ids = self.model.generate(**inputs, **gen_kwargs)
+
+        # With left-padding, all inputs are padded to the same length,
+        # so input_len is uniform across the batch
+        input_len = inputs["input_ids"].shape[1]
+        generated_ids = generated_ids[:, input_len:]
+        responses = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
+
+        return [r.strip() for r in responses]
 
     def _generate_qwen2_5_vl(
         self,
@@ -876,6 +1147,262 @@ def generate_self_reflective_dialogue(
 
 
 # ============================================
+# Batched Multi-Turn Orchestrator
+# ============================================
+
+
+def generate_self_reflective_dialogue_batch(
+    engine: SelfReflectionEngine,
+    samples: list[dict],
+    sample_indices: list[int],
+    image_base_dir: str,
+    generation_config: dict,
+    batch_size: int = 4,
+) -> list[SampleResult | None]:
+    """Generate self-reflective dialogues for multiple samples using batched inference.
+
+    Processes all samples through each turn in lockstep, batching the forward
+    passes across samples at the same turn level. Within a sample turns are
+    sequential, but across samples at the same turn level all inputs are
+    independent and batchable.
+
+    Args:
+        engine: Self-reflection inference engine
+        samples: List of input samples with messages and images
+        sample_indices: List of dataset indices corresponding to each sample
+        image_base_dir: Base directory for image paths
+        generation_config: Generation parameters
+        batch_size: Number of samples per forward pass
+
+    Returns:
+        List of SampleResult (or None for failed samples), one per input sample
+    """
+    max_new_tokens = generation_config.get("max_new_tokens", 512)
+    answer_temperature = generation_config.get("answer_temperature", 0.7)
+    feedback_temperature = generation_config.get("feedback_temperature", 0.7)
+    top_p = generation_config.get("top_p", 0.9)
+    requested_num_turns = generation_config.get("num_turns", 0)
+
+    n = len(samples)
+
+    # ---- Step 1: Pre-validate all samples ----
+    # Maps sample index -> validated data (only valid samples present)
+    valid_data: dict[int, dict] = {}
+    for idx, sample in enumerate(samples):
+        question, gt_responses, images, _ = parse_sample(sample)
+        if not question or not images or not gt_responses:
+            logger.warning(f"Sample {sample_indices[idx]}: missing question/images/gt_responses")
+            continue
+
+        image_path = resolve_image_path(images[0], image_base_dir)
+        if not image_path:
+            continue
+
+        num_turns = requested_num_turns if requested_num_turns > 0 else len(gt_responses)
+        clean_question = question.replace("<image>", "").strip()
+
+        valid_data[idx] = {
+            "question": clean_question,
+            "image_path": image_path,
+            "gt_responses": gt_responses,
+            "num_turns": num_turns,
+        }
+
+    # ---- Step 2: Initialize per-sample state ----
+    refinement_histories: list[list[dict]] = [[] for _ in range(n)]
+    critic_histories: list[list[dict]] = [[] for _ in range(n)]
+    generated_turns: list[list[dict]] = [[] for _ in range(n)]
+    full_histories: list[list[dict]] = [[] for _ in range(n)]
+    active_mask: list[bool] = [False] * n
+
+    max_turns = 0
+    for i, p in valid_data.items():
+        active_mask[i] = True
+        max_turns = max(max_turns, p["num_turns"])
+
+        # Build initial user message with image
+        initial_user_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": p["question"]},
+                {"type": "image", "image": p["image_path"]},
+            ],
+        }
+        refinement_histories[i] = [initial_user_message]
+
+        # Critic history with flipped roles
+        critic_histories[i] = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "image", "image": p["image_path"]},
+                    {"type": "text", "text": p["question"]},
+                ],
+            }
+        ]
+
+    if max_turns == 0:
+        return [None] * n
+
+    # ---- Step 3: Turn-by-turn batched generation ----
+    for turn_idx in range(max_turns):
+        active_indices = [i for i in range(n) if active_mask[i]]
+        if not active_indices:
+            break
+
+        if turn_idx == 0:
+            # Batch-generate initial answers
+            for chunk_start in range(0, len(active_indices), batch_size):
+                chunk = active_indices[chunk_start : chunk_start + batch_size]
+                messages_batch = [refinement_histories[i] for i in chunk]
+
+                try:
+                    answers = engine.generate_batch(
+                        messages_list=messages_batch,
+                        system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
+                        max_new_tokens=max_new_tokens,
+                        temperature=answer_temperature,
+                        top_p=top_p,
+                    )
+                except torch.cuda.OutOfMemoryError:
+                    logger.warning("OOM in batch generation, falling back to sequential")
+                    torch.cuda.empty_cache()
+                    answers = []
+                    for msgs in messages_batch:
+                        try:
+                            ans = engine.generate(
+                                messages=msgs,
+                                system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
+                                max_new_tokens=max_new_tokens,
+                                temperature=answer_temperature,
+                                top_p=top_p,
+                            )
+                            answers.append(ans)
+                        except Exception as e:
+                            logger.error(f"Sequential fallback failed: {e}")
+                            answers.append("")
+
+                for j, i in enumerate(chunk):
+                    answer = answers[j]
+                    refinement_histories[i].append({"role": "assistant", "content": answer})
+                    critic_histories[i].append({"role": "user", "content": answer})
+                    full_histories[i].append(
+                        {"role": "user", "content": f"[IMAGE]\n{valid_data[i]['question']}"}
+                    )
+                    full_histories[i].append({"role": "assistant", "content": answer})
+                    generated_turns[i].append({"answer": answer, "feedback": ""})
+
+        else:
+            # Step 3a: Batch-generate feedback (critic mode, flipped roles)
+            for chunk_start in range(0, len(active_indices), batch_size):
+                chunk = active_indices[chunk_start : chunk_start + batch_size]
+                messages_batch = [critic_histories[i] for i in chunk]
+
+                try:
+                    feedbacks = engine.generate_batch(
+                        messages_list=messages_batch,
+                        system_prompt=FEEDBACK_CRITIC_SYSTEM_PROMPT,
+                        max_new_tokens=max_new_tokens,
+                        temperature=feedback_temperature,
+                        top_p=top_p,
+                    )
+                except torch.cuda.OutOfMemoryError:
+                    logger.warning("OOM in batch feedback, falling back to sequential")
+                    torch.cuda.empty_cache()
+                    feedbacks = []
+                    for msgs in messages_batch:
+                        try:
+                            fb = engine.generate(
+                                messages=msgs,
+                                system_prompt=FEEDBACK_CRITIC_SYSTEM_PROMPT,
+                                max_new_tokens=max_new_tokens,
+                                temperature=feedback_temperature,
+                                top_p=top_p,
+                            )
+                            feedbacks.append(fb)
+                        except Exception as e:
+                            logger.error(f"Sequential fallback failed: {e}")
+                            feedbacks.append("")
+
+                for j, i in enumerate(chunk):
+                    feedback = feedbacks[j]
+                    critic_histories[i].append({"role": "assistant", "content": feedback})
+                    generated_turns[i][-1]["feedback"] = feedback
+                    full_histories[i].append({"role": "user", "content": f"[FEEDBACK]: {feedback}"})
+                    refinement_histories[i].append({"role": "user", "content": feedback})
+
+            # Step 3b: Batch-generate refined answers
+            # Re-collect active indices (some may have been deactivated by OOM)
+            active_for_refine = [i for i in active_indices if active_mask[i]]
+            for chunk_start in range(0, len(active_for_refine), batch_size):
+                chunk = active_for_refine[chunk_start : chunk_start + batch_size]
+                messages_batch = [refinement_histories[i] for i in chunk]
+
+                try:
+                    refined_answers = engine.generate_batch(
+                        messages_list=messages_batch,
+                        system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
+                        max_new_tokens=max_new_tokens,
+                        temperature=answer_temperature,
+                        top_p=top_p,
+                    )
+                except torch.cuda.OutOfMemoryError:
+                    logger.warning("OOM in batch refinement, falling back to sequential")
+                    torch.cuda.empty_cache()
+                    refined_answers = []
+                    for msgs in messages_batch:
+                        try:
+                            ra = engine.generate(
+                                messages=msgs,
+                                system_prompt=VL_ASSISTANT_SYSTEM_PROMPT,
+                                max_new_tokens=max_new_tokens,
+                                temperature=answer_temperature,
+                                top_p=top_p,
+                            )
+                            refined_answers.append(ra)
+                        except Exception as e:
+                            logger.error(f"Sequential fallback failed: {e}")
+                            refined_answers.append("")
+
+                for j, i in enumerate(chunk):
+                    refined_answer = refined_answers[j]
+                    refinement_histories[i].append({"role": "assistant", "content": refined_answer})
+                    critic_histories[i].append({"role": "user", "content": refined_answer})
+                    full_histories[i].append({"role": "assistant", "content": refined_answer})
+                    generated_turns[i].append({"answer": refined_answer, "feedback": ""})
+
+        # Deactivate samples that reached their turn limit
+        for i in active_indices:
+            if len(generated_turns[i]) >= valid_data[i]["num_turns"]:
+                active_mask[i] = False
+
+    # ---- Step 4: Build results ----
+    results: list[SampleResult | None] = []
+    for i in range(n):
+        if i not in valid_data or not generated_turns[i]:
+            results.append(None)
+            continue
+
+        p = valid_data[i]
+        final_answer = generated_turns[i][-1]["answer"] if generated_turns[i] else ""
+
+        results.append(
+            SampleResult(
+                sample_index=sample_indices[i],
+                image_path=p["image_path"],
+                question=p["question"],
+                generated_turns=generated_turns[i],
+                final_answer=final_answer,
+                gt_final_answer=p["gt_responses"][-1],
+                num_turns=len(generated_turns[i]),
+                messages_history=full_histories[i],
+            )
+        )
+
+    return results
+
+
+# ============================================
 # CLI and Main
 # ============================================
 
@@ -982,12 +1509,48 @@ def parse_args():
         f"Options: {', '.join(SUPPORTED_MODEL_TYPES)}",
     )
 
+    # Batch and parallelism configuration
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+        help="Number of samples to process per forward pass. "
+        "A6000 (48GB): 2-4, A100 (80GB): 4-8. Default=1 (sequential).",
+    )
+    parser.add_argument(
+        "--multi_gpu",
+        action="store_true",
+        help="Enable multi-GPU data parallelism. Each GPU loads a model copy and "
+        "processes a shard of the dataset. Launch with: "
+        "accelerate launch --num_processes N script.py --multi_gpu",
+    )
+
     return parser.parse_args()
 
 
 def main():
     """Main function for self-reflective inference with role-flipped feedback."""
     args = parse_args()
+
+    # ---- Multi-GPU setup ----
+    if args.multi_gpu:
+        from accelerate import Accelerator
+
+        accelerator = Accelerator()
+        local_rank = accelerator.local_process_index
+        world_size = accelerator.num_processes
+        device = f"cuda:{local_rank}"
+        is_main = accelerator.is_main_process
+        device_map_strategy = "per_gpu"
+
+        logger.info(f"Multi-GPU mode: rank {local_rank}/{world_size}, device={device}")
+    else:
+        local_rank = 0
+        world_size = 1
+        device = args.device
+        is_main = True
+        device_map_strategy = "auto"
+        accelerator = None
 
     # Detect model type
     model_type = detect_model_type(args.model_path, args.model_type)
@@ -996,12 +1559,28 @@ def main():
     engine = SelfReflectionEngine(
         model_path=args.model_path,
         model_type=model_type,
-        device=args.device,
+        device=device,
         use_flash_attn=not args.no_flash_attn,
+        device_map_strategy=device_map_strategy,
     )
 
     # Load dataset
-    samples = load_dataset(args.dataset_path, args.max_samples, args.start_index)
+    all_samples = load_dataset(args.dataset_path, args.max_samples, args.start_index)
+
+    # ---- Shard dataset across GPUs ----
+    if world_size > 1:
+        shard_size = len(all_samples) // world_size
+        shard_start = local_rank * shard_size
+        shard_end = shard_start + shard_size if local_rank < world_size - 1 else len(all_samples)
+        samples = all_samples[shard_start:shard_end]
+        index_offset = args.start_index + shard_start
+        logger.info(
+            f"Rank {local_rank}: processing samples {shard_start}-{shard_end} "
+            f"({len(samples)} samples)"
+        )
+    else:
+        samples = all_samples
+        index_offset = args.start_index
 
     # Generation config
     feedback_temp = (
@@ -1015,61 +1594,137 @@ def main():
         "num_turns": args.num_turns,
     }
 
-    # Process samples
-    results = []
-    failed = 0
-
+    # ---- Determine output path (per-rank for multi-GPU) ----
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, "w") as f:
-        for i, sample in enumerate(
-            tqdm(samples, desc="Self-reflective inference (v2)"), start=args.start_index
-        ):
+    if world_size > 1:
+        rank_output_path = (
+            output_path.parent / f"{output_path.stem}_rank{local_rank}{output_path.suffix}"
+        )
+    else:
+        rank_output_path = output_path
+
+    # ---- Process samples ----
+    results = []
+    failed = 0
+
+    if args.batch_size > 1:
+        # Batched processing
+        logger.info(f"Batch mode: batch_size={args.batch_size}")
+        for chunk_start in range(0, len(samples), args.batch_size):
+            chunk_end = min(chunk_start + args.batch_size, len(samples))
+            chunk_samples = samples[chunk_start:chunk_end]
+            chunk_indices = list(
+                range(
+                    index_offset + chunk_start,
+                    index_offset + chunk_end,
+                )
+            )
+
             try:
-                result = generate_self_reflective_dialogue(
+                batch_results = generate_self_reflective_dialogue_batch(
                     engine=engine,
-                    sample=sample,
-                    sample_index=i,
+                    samples=chunk_samples,
+                    sample_indices=chunk_indices,
                     image_base_dir=args.image_base_dir,
                     generation_config=gen_config,
+                    batch_size=args.batch_size,
                 )
+                for result in batch_results:
+                    if result:
+                        results.append(result)
+                    else:
+                        failed += 1
+            except Exception as e:
+                logger.error(f"Failed batch starting at index {chunk_start}: {e}")
+                failed += len(chunk_samples)
 
-                if result:
-                    f.write(json.dumps(result.to_dict()) + "\n")
-                    results.append(result)
-                else:
+        # Write all results
+        with open(rank_output_path, "w") as f:
+            for result in results:
+                f.write(json.dumps(result.to_dict()) + "\n")
+    else:
+        # Original sequential processing (batch_size=1)
+        with open(rank_output_path, "w") as f:
+            for i, sample in enumerate(
+                tqdm(samples, desc="Self-reflective inference (v2)"), start=index_offset
+            ):
+                try:
+                    result = generate_self_reflective_dialogue(
+                        engine=engine,
+                        sample=sample,
+                        sample_index=i,
+                        image_base_dir=args.image_base_dir,
+                        generation_config=gen_config,
+                    )
+
+                    if result:
+                        f.write(json.dumps(result.to_dict()) + "\n")
+                        results.append(result)
+                    else:
+                        failed += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to process sample {i}: {e}")
                     failed += 1
 
-            except Exception as e:
-                logger.error(f"Failed to process sample {i}: {e}")
-                failed += 1
+    # ---- Merge results from all ranks ----
+    if world_size > 1 and accelerator is not None:
+        accelerator.wait_for_everyone()
 
-    # Print summary
-    print("\n" + "=" * 60)
-    print("SELF-REFLECTIVE INFERENCE V2 (Role-Flipped) SUMMARY")
-    print("=" * 60)
-    print(f"Total samples: {len(samples)}")
-    print(f"Successfully processed: {len(results)}")
-    print(f"Failed: {failed}")
-    print(f"Output saved to: {output_path}")
+        if is_main:
+            logger.info("Merging results from all ranks...")
+            merged = []
+            for rank in range(world_size):
+                rank_file = (
+                    output_path.parent / f"{output_path.stem}_rank{rank}{output_path.suffix}"
+                )
+                if rank_file.exists():
+                    with open(rank_file) as f_in:
+                        for line in f_in:
+                            merged.append(json.loads(line))
+                    rank_file.unlink()
 
-    if results:
-        avg_turns = sum(r.num_turns for r in results) / len(results)
-        print(f"Average turns per sample: {avg_turns:.2f}")
+            # Sort by sample_index for deterministic output
+            merged.sort(key=lambda x: x["sample_index"])
+            with open(output_path, "w") as f_out:
+                for r in merged:
+                    f_out.write(json.dumps(r) + "\n")
 
-        # Show a preview of first result
-        print("\n--- First Result Preview ---")
-        first = results[0]
-        print(f"Question: {first.question[:100]}...")
-        print(f"Num turns: {first.num_turns}")
-        for i, turn in enumerate(first.generated_turns):
-            print(f"  Turn {i}: {turn['answer'][:80]}...")
-            if turn["feedback"]:
-                print(f"    Feedback: {turn['feedback'][:80]}...")
-        print(f"GT final: {first.gt_final_answer[:100]}...")
+            logger.info(f"Merged {len(merged)} results to {output_path}")
 
-    print("=" * 60)
+    # ---- Print summary (main process only) ----
+    if is_main:
+        final_output = output_path if world_size > 1 else rank_output_path
+        print("\n" + "=" * 60)
+        print("SELF-REFLECTIVE INFERENCE V2 (Role-Flipped) SUMMARY")
+        print("=" * 60)
+        print(f"Total samples: {len(all_samples if world_size > 1 else samples)}")
+        print(f"Successfully processed: {len(results)}")
+        print(f"Failed: {failed}")
+        if world_size > 1:
+            print(f"GPUs used: {world_size}")
+        if args.batch_size > 1:
+            print(f"Batch size: {args.batch_size}")
+        print(f"Output saved to: {final_output}")
+
+        if results:
+            avg_turns = sum(r.num_turns for r in results) / len(results)
+            print(f"Average turns per sample: {avg_turns:.2f}")
+
+            # Show a preview of first result
+            print("\n--- First Result Preview ---")
+            first = results[0]
+            print(f"Question: {first.question[:100]}...")
+            print(f"Num turns: {first.num_turns}")
+            for i, turn in enumerate(first.generated_turns):
+                print(f"  Turn {i}: {turn['answer'][:80]}...")
+                if turn["feedback"]:
+                    print(f"    Feedback: {turn['feedback'][:80]}...")
+            print(f"GT final: {first.gt_final_answer[:100]}...")
+
+        print("=" * 60)
 
 
 if __name__ == "__main__":
