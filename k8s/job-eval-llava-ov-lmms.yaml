@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-llava-lmms-multi-turn-feedback
+  name: eval-llava-lmms-mt-st
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -97,13 +97,13 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "/outputs/llava-7b-fire-full-sft-multi-turn/v0-20260208-031444/checkpoint-1485"
+          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/llava_1_5_lmms_eval"
+          value: "/outputs/benchmark_results/llava_1_5_mt_st"
         - name: NUM_GPUS
-          value: "4"
+          value: "2"
         - name: BENCHMARKS
-          value: "ai2d,mme,mmmu_val,ocrbench,seedbench"
+          value: "all"
         - name: LIMIT
           value: "0"
 
@@ -115,13 +115,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "4"
-            memory: "64Gi"
-            cpu: "4"
+            nvidia.com/rtxa6000: "2"
+            memory: "48Gi"
+            cpu: "3"
           limits:
-            nvidia.com/rtxa6000: "4"
-            memory: "64Gi"
-            cpu: "4"
+            nvidia.com/rtxa6000: "2"
+            memory: "56Gi"
+            cpu: "3"
 
         volumeMounts:
         - name: cache-volume
@@ -142,14 +142,14 @@ spec:
         - key: nautilus.io/reservation
           operator: Exists
           effect: NoSchedule
-        - key: nautilus.io/issue
-          operator: Exists
-          effect: NoSchedule
+        # - key: nautilus.io/issue
+        #   operator: Exists
+        #   effect: NoSchedule
 
       volumes:
       - name: cache-volume
         emptyDir:
-          sizeLimit: 200Gi
+          sizeLimit: 100Gi
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc

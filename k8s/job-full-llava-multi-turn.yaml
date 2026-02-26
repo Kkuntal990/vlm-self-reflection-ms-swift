@@ -150,8 +150,8 @@ spec:
           value: "llava-7b-fire-full-sft-multi-turn"
         - name: RESUME_PATH
           # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
-          value: "/outputs/llava-multi-turn-training/v0-20260207-154959/checkpoint-700"
-
+          # value: "/outputs/llava-multi-turn-training/v0-20260207-154959/checkpoint-700"
+          value: ""
         # Logging configuration
         - name: LOGGING_STEPS
           value: "10"

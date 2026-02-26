@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-lmms-eval-llava-single-turn-feedback
+  name: eval-lmms-eval-qwen-mt-st
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -98,11 +98,11 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "/outputs/llava-ov-feedback-training-single-turn-data2/v5-20260201-010607/checkpoint-2735"
+          value: "/outputs/qwen-7b-fire-full-sft-multi-turn/v0-20260208-221647/checkpoint-1485"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/lmms_eval_base"
+          value: "/outputs/benchmark_results/qwen-eval-mt-st"
         - name: NUM_GPUS
-          value: "4"
+          value: "2"
         - name: BENCHMARKS
           value: "all"
         - name: LIMIT
@@ -116,13 +116,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "4"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/rtxa6000: "2"
+            memory: "48Gi"
+            cpu: "4"
           limits:
-            nvidia.com/rtxa6000: "4"
-            memory: "128Gi"
-            cpu: "8"
+            nvidia.com/rtxa6000: "2"
+            memory: "64Gi"
+            cpu: "4"
 
         volumeMounts:
         - name: cache-volume
@@ -143,9 +143,9 @@ spec:
         - key: nautilus.io/reservation
           operator: Exists
           effect: NoSchedule
-        - key: nautilus.io/issue
-          operator: Exists
-          effect: NoSchedule
+        # - key: nautilus.io/issue
+        #   operator: Exists
+        #   effect: NoSchedule
 
       volumes:
       - name: cache-volume
