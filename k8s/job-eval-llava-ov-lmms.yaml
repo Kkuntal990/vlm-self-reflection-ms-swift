@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-llava-lmms-mt-st
+  name: eval-llava-lmms-mt-st-lvlm
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -97,9 +97,9 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459"
+          value: "/outputs/llava-7b-fire-full-sft-mt-st-lvlm/v7-20260226-215219/checkpoint-338"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/llava_1_5_mt_st"
+          value: "/outputs/benchmark_results/llava_1_5_mt_st_lvlm"
         - name: NUM_GPUS
           value: "2"
         - name: BENCHMARKS

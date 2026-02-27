@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llava-7b-fire-full-sft-multi-and-single-turn
+  name: llava-7b-fire-full-sft-lvlm
 spec:
   backoffLimit: 1
   template:
@@ -42,7 +42,6 @@ spec:
             fi
             echo "Found: ${dataset}"
             ls -lh "${dataset_file}"
-            wc -l "${dataset_file}"
             echo ""
           done
 
@@ -58,13 +57,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "2"
-            memory: "64Gi"
-            cpu: "4"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
+            cpu: "8"
           limits:
-            nvidia.com/a100: "2"
-            memory: "80Gi"
-            cpu: "4"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
+            cpu: "8"
 
         volumeMounts:
         - name: cache-volume
@@ -101,11 +100,11 @@ spec:
 
         # Model configuration
         - name: MODEL_ID
-          value: "llava-hf/llava-1.5-7b-hf"
+          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
         # - name: DATASET_PATH
         #   value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
         - name: DATASET_PATH
-          value: "/outputs/fire_preprocessed_v3/fire_feedback_train_v2.jsonl /outputs/fire_preprocessed_v3/fire_messages_train_last_loss_only.jsonl#75000 outputs/fire_preprocessed_v3/fire_last_response_train.jsonl#75000"
+          value: "/outputs/fire_preprocessed_v3/fire_messages_train_last_loss_only.jsonl#10000 /outputs/fire_preprocessed_v3/fire_feedback_train_v2.jsonl#25000 /outputs/fire_preprocessed_v3/fire_last_response_train.jsonl#15000 /outputs/lvlm_nlf_preprocessed/lvlm_nlf_messages_train_last_loss_only_filtered.jsonl#40000"
 
         #Qwen MAX_LEN: 3124
         - name: MAX_LEN
@@ -122,7 +121,7 @@ spec:
         - name: EPOCHS
           value: "1"           # Number of training epochs
         - name: LR
-          value: "3e-6"        # Learning rate (lower for full fine-tuning)
+          value: "2e-6"        # Learning rate (lower for full fine-tuning)
         - name: WARMUP_RATIO
           value: "0.03"        # Warmup ratio
         - name: WEIGHT_DECAY
@@ -138,7 +137,7 @@ spec:
 
         # DDP configuration
         - name: NPROC
-          value: "2"           # Number of GPUs
+          value: "4"           # Number of GPUs
 
         - name: NCCL_DEBUG
           value: "WARN"
@@ -147,18 +146,18 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "llava-7b-fire-full-sft-multi-and-single-turn"
-        - name: RESUME_PATH
-          # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
-          value: "/outputs/llava-single-and-multi-turn-training/v1-20260207-154755/checkpoint-500"
+          value: "llava-7b-fire-full-sft-mt-st-lvlm"
+        # - name: RESUME_PATH
+        #   # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
+        #   value: "outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
 
         # Logging configuration
         - name: LOGGING_STEPS
           value: "10"
         - name: EVAL_STEPS
-          value: "1000"
+          value: "10000"
         - name: SAVE_STEPS
-          value: "500"
+          value: "800"
         - name: SAVE_TOTAL_LIMIT
           value: "2"
 

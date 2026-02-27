@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-self-refinement-llava-base
+  name: eval-job-self-refinement-llava-st-mt-lvlm
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -123,12 +123,12 @@ spec:
 
         # Model and dataset paths
         - name: MODEL_PATH
-        #  value: "/outputs/qwen-7b-fire-full-sft-multi-turn/v0-20260208-221647/checkpoint-1485"
-          value: "llava-hf/llava-1.5-7b-hf"
+          value: "/outputs/llava-7b-fire-full-sft-mt-st-lvlm/v7-20260226-215219/checkpoint-338"
+        # value: "llava-hf/llava-1.5-7b-hf"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v5/llava_base_t2.jsonl"
+          value: "/outputs/inference_v5/llava_st_mt_lvlm_t2.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
