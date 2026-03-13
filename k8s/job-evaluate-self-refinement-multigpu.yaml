@@ -31,7 +31,8 @@ spec:
           echo "Self-Reflective Inference V2 (Multi-GPU)"
           echo "========================================="
           echo ""
-          echo "Model Path: ${MODEL_PATH}"
+          echo "Model Path:      ${MODEL_PATH}"
+          echo "Base Model Path: ${BASE_MODEL_PATH:-none (full model)}"
           echo "Dataset: ${DATASET_PATH}"
           echo "Output: ${OUTPUT_PATH}"
           echo "Image Base Dir: ${IMAGE_BASE_DIR}"
@@ -77,21 +78,25 @@ spec:
           echo "Starting multi-GPU inference (${NUM_GPUS} GPUs, batch_size=${BATCH_SIZE})..."
           echo ""
 
-          accelerate launch \
+          INFER_CMD="accelerate launch \
             --num_processes ${NUM_GPUS} \
             --main_process_port 29501 \
             /workspace/scripts/evaluation/self_reflective_inference_v2.py \
-            --model_path "${MODEL_PATH}" \
-            --dataset_path "${DATASET_PATH}" \
-            --output_path "${OUTPUT_PATH}" \
-            --image_base_dir "${IMAGE_BASE_DIR}" \
+            --model_path ${MODEL_PATH} \
+            --dataset_path ${DATASET_PATH} \
+            --output_path ${OUTPUT_PATH} \
+            --image_base_dir ${IMAGE_BASE_DIR} \
             --temperature ${TEMPERATURE} \
             --feedback_temperature ${FEEDBACK_TEMPERATURE} \
             --start_index ${START_INDEX} \
             --max_samples ${MAX_SAMPLES} \
             --num_turns ${NUM_TURNS} \
             --batch_size ${BATCH_SIZE} \
-            --multi_gpu
+            --multi_gpu"
+          if [ -n "${BASE_MODEL_PATH:-}" ]; then
+            INFER_CMD="${INFER_CMD} --base_model_path ${BASE_MODEL_PATH}"
+          fi
+          eval "${INFER_CMD}"
 
           echo ""
           echo "========================================="
@@ -125,6 +130,8 @@ spec:
         - name: MODEL_PATH
           value: "/outputs/llava-7b-fire-full-sft-mt-st-lvlm/v7-20260226-215219/checkpoint-338"
         # value: "llava-hf/llava-1.5-7b-hf"
+        - name: BASE_MODEL_PATH
+          value: ""  # Set to base model path for LoRA adapter checkpoints
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH

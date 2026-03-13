@@ -260,6 +260,7 @@ class SelfReflectionEngine:
         dtype: torch.dtype = torch.bfloat16,
         use_flash_attn: bool = True,
         device_map_strategy: str = "auto",
+        base_model_path: str = "",
     ):
         """Initialize the inference engine.
 
@@ -272,24 +273,32 @@ class SelfReflectionEngine:
             device_map_strategy: Model placement strategy:
                 "auto" - use device_map="auto" (single GPU, spreads across devices)
                 "per_gpu" - no device_map, explicitly place on `device` (multi-GPU)
+            base_model_path: Base model for LoRA adapters (empty = full model)
         """
         if model_type not in SUPPORTED_MODEL_TYPES:
             raise ValueError(
                 f"Invalid model_type: '{model_type}'. Supported: {SUPPORTED_MODEL_TYPES}"
             )
 
-        self.model_path = model_path
+        self.base_model_path = base_model_path
+        # For LoRA: load from base model path, apply adapter from model_path
+        load_path = base_model_path if base_model_path else model_path
+        self.model_path = load_path
         self.model_type = model_type
         self.device = device
         self.dtype = dtype
         self.device_map_strategy = device_map_strategy
 
-        logger.info(f"Loading model from {model_path} (type: {model_type}, device: {device})")
+        if base_model_path:
+            logger.info(f"Loading base model from {base_model_path} (type: {model_type})")
+            logger.info(f"LoRA adapter: {model_path}")
+        else:
+            logger.info(f"Loading model from {model_path} (type: {model_type}, device: {device})")
 
         # Lazy import for processor (works for both model types)
         from transformers import AutoProcessor
 
-        self.processor = AutoProcessor.from_pretrained(model_path)
+        self.processor = AutoProcessor.from_pretrained(load_path)
 
         # Left-pad for batched generation (decoder-only models need left-padding
         # so all sequences align at the right/generation end)
@@ -303,6 +312,15 @@ class SelfReflectionEngine:
             self._load_llava(attn_impl, device, dtype)
         else:
             self._load_qwen2_5_vl(attn_impl, device, dtype)
+
+        # Apply LoRA adapter if base_model_path was specified
+        if base_model_path:
+            from peft import PeftModel
+
+            logger.info(f"Applying LoRA adapter from {model_path}")
+            self.model = PeftModel.from_pretrained(self.model, model_path)
+            self.model = self.model.merge_and_unload()
+            logger.info("LoRA adapter merged")
 
         # For per_gpu strategy, move model to the specific device
         if device_map_strategy == "per_gpu":
@@ -1538,6 +1556,14 @@ def parse_args():
         help="Nucleus sampling probability",
     )
 
+    # LoRA adapter support
+    parser.add_argument(
+        "--base_model_path",
+        type=str,
+        default="",
+        help="Base model path for LoRA adapter checkpoints (empty = full model)",
+    )
+
     # Model configuration
     parser.add_argument(
         "--device",
@@ -1603,8 +1629,9 @@ def main():
         device_map_strategy = "auto"
         accelerator = None
 
-    # Detect model type
-    model_type = detect_model_type(args.model_path, args.model_type)
+    # Detect model type (use base model path for detection if LoRA adapter)
+    detect_path = args.base_model_path if args.base_model_path else args.model_path
+    model_type = detect_model_type(detect_path, args.model_type)
 
     # Initialize engine
     engine = SelfReflectionEngine(
@@ -1613,6 +1640,7 @@ def main():
         device=device,
         use_flash_attn=not args.no_flash_attn,
         device_map_strategy=device_map_strategy,
+        base_model_path=args.base_model_path,
     )
 
     # Load dataset

@@ -32,6 +32,7 @@ set -euo pipefail
 # ========================================
 FRAMEWORK="lmms-eval"
 MODEL_PATH=""
+BASE_MODEL_PATH=""  # Base model for LoRA adapters (empty = full model)
 MODEL_NAME="FireSFT-Qwen2-5-VL-7B"
 MODEL_TYPE=""  # lmms-eval model type: qwen2_5_vl, llava_onevision, llava, etc.
 OUTPUT_DIR="/outputs/benchmark_results"
@@ -93,6 +94,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --model-path)
             MODEL_PATH="$2"
+            shift 2
+            ;;
+        --base-model-path)
+            BASE_MODEL_PATH="$2"
             shift 2
             ;;
         --model-name)
@@ -310,10 +315,14 @@ run_vlmevalkit() {
     # Register custom model
     echo "Registering custom model '${MODEL_NAME}'..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    python "${SCRIPT_DIR}/register_vlmevalkit_model.py" \
-        --model-path "${MODEL_PATH}" \
-        --model-name "${MODEL_NAME}" \
-        --vlmevalkit-dir "${VLMEVALKIT_DIR}"
+    local register_cmd="python ${SCRIPT_DIR}/register_vlmevalkit_model.py \
+        --model-path ${MODEL_PATH} \
+        --model-name ${MODEL_NAME} \
+        --vlmevalkit-dir ${VLMEVALKIT_DIR}"
+    if [ -n "${BASE_MODEL_PATH}" ]; then
+        register_cmd="${register_cmd} --base-model-path ${BASE_MODEL_PATH}"
+    fi
+    eval "${register_cmd}"
 
     # VLMEvalKit has no native --limit flag. When LIMIT > 0, pre-download
     # dataset TSVs and truncate to LIMIT rows before running inference.

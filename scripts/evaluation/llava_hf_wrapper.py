@@ -23,33 +23,52 @@ class LLaVA_HF(BaseModel):
     INSTALL_REQ = False
     INTERLEAVE = False
 
-    def __init__(self, model_path: str, **kwargs) -> None:
+    def __init__(self, model_path: str, base_model_path: str = "", **kwargs) -> None:
         """Initialize the LLaVA-HF model.
 
         Args:
-            model_path: Path to HuggingFace-format LLaVA checkpoint.
+            model_path: Path to HuggingFace-format LLaVA checkpoint or LoRA adapter.
+            base_model_path: Base model path for LoRA adapters (empty = full model).
             **kwargs: Additional arguments passed to BaseModel.
         """
         from transformers import AutoProcessor, LlavaForConditionalGeneration
 
         self.model_path = model_path
 
-        self.processor = AutoProcessor.from_pretrained(model_path)
+        # For LoRA adapters, load processor from base model
+        processor_path = base_model_path if base_model_path else model_path
+        self.processor = AutoProcessor.from_pretrained(processor_path)
 
+        # Determine flash attention support
+        attn_kwargs = {}
         try:
             import flash_attn  # noqa: F401
+            attn_kwargs["attn_implementation"] = "flash_attention_2"
+        except ImportError:
+            pass
 
-            model = LlavaForConditionalGeneration.from_pretrained(
-                model_path,
+        if base_model_path:
+            # LoRA adapter: load base model, apply adapter, merge
+            from peft import PeftModel
+
+            logger.info(f"Loading base model from {base_model_path}")
+            base_model = LlavaForConditionalGeneration.from_pretrained(
+                base_model_path,
                 dtype=torch.float16,
                 low_cpu_mem_usage=True,
-                attn_implementation="flash_attention_2",
+                **attn_kwargs,
             )
-        except (ImportError, ValueError):
+            logger.info(f"Loading LoRA adapter from {model_path}")
+            model = PeftModel.from_pretrained(base_model, model_path)
+            model = model.merge_and_unload()
+            logger.info("LoRA adapter merged")
+        else:
+            # Full model checkpoint
             model = LlavaForConditionalGeneration.from_pretrained(
                 model_path,
                 dtype=torch.float16,
                 low_cpu_mem_usage=True,
+                **attn_kwargs,
             )
 
         model = model.eval()

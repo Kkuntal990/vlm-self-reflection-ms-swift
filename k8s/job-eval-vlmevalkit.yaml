@@ -33,8 +33,9 @@ spec:
           echo "VLMEvalKit Benchmark Evaluation"
           echo "========================================="
           echo ""
-          echo "Model Path:  ${MODEL_PATH}"
-          echo "Model Name:  ${MODEL_NAME}"
+          echo "Model Path:       ${MODEL_PATH}"
+          echo "Base Model Path:  ${BASE_MODEL_PATH:-none (full model)}"
+          echo "Model Name:       ${MODEL_NAME}"
           echo "Output Dir:  ${OUTPUT_DIR}"
           echo "Num GPUs:    ${NUM_GPUS}"
           echo "Benchmarks:  ${BENCHMARKS}"
@@ -63,14 +64,18 @@ spec:
           echo "Starting VLMEvalKit evaluation..."
           echo ""
 
-          bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
+          EVAL_CMD="bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
             --framework vlmevalkit \
-            --model-path "${MODEL_PATH}" \
-            --model-name "${MODEL_NAME}" \
-            --output-dir "${OUTPUT_DIR}" \
-            --num-gpus "${NUM_GPUS}" \
-            --benchmarks "${BENCHMARKS}" \
-            --batch-size "${BATCH_SIZE}"
+            --model-path ${MODEL_PATH} \
+            --model-name ${MODEL_NAME} \
+            --output-dir ${OUTPUT_DIR} \
+            --num-gpus ${NUM_GPUS} \
+            --benchmarks ${BENCHMARKS} \
+            --batch-size ${BATCH_SIZE}"
+          if [ -n "${BASE_MODEL_PATH:-}" ]; then
+            EVAL_CMD="${EVAL_CMD} --base-model-path ${BASE_MODEL_PATH}"
+          fi
+          eval "${EVAL_CMD}"
 
           echo ""
           echo "========================================="
@@ -102,6 +107,8 @@ spec:
         - name: MODEL_PATH
           #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
           value: "llava-hf/llava-1.5-7b-hf"
+        - name: BASE_MODEL_PATH
+          value: ""  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
           value: "LLaVa-7B-base"
