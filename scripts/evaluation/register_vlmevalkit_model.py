@@ -12,7 +12,7 @@ Usage:
         --model-name FireSFT-Qwen2-5-VL-7B \
         --vlmevalkit-dir /tmp/VLMEvalKit
 
-    # LLaVA model
+    # LLaVA model (uses custom HF wrapper)
     python scripts/evaluation/register_vlmevalkit_model.py \
         --model-path /outputs/llava-checkpoint \
         --model-name FireSFT-LLaVA-7B \
@@ -32,23 +32,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
-
-# Mapping from user-friendly model class names to VLMEvalKit class names
-# and their config section markers
-MODEL_CLASS_CONFIG = {
-    "qwen2vl": {
-        "class_name": "Qwen2VLChat",
-        "markers": ["Qwen2.5-VL-7B-Instruct", "Qwen2VLChat"],
-    },
-    "llava": {
-        "class_name": "LLaVA",
-        "markers": ["llava_v1.5_7b", "LLaVA, model_path"],
-    },
-    "llava_next": {
-        "class_name": "LLaVA_Next",
-        "markers": ["llava_next_vicuna_7b", "LLaVA_Next, model_path"],
-    },
-}
 
 
 def detect_model_class(model_path: str) -> str:
@@ -120,113 +103,136 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_entry(
-    model_name: str,
-    model_path: str,
-    model_class: str,
-    min_pixels: int,
-    max_pixels: int,
-) -> str:
-    """Build the config entry string for the model.
-
-    Args:
-        model_name: Name to register the model under.
-        model_path: Path to the model checkpoint.
-        model_class: Model class key (e.g., 'qwen2vl', 'llava').
-        min_pixels: Minimum pixel count (Qwen2VL only).
-        max_pixels: Maximum pixel count (Qwen2VL only).
-
-    Returns:
-        Config entry string to insert into VLMEvalKit config.py.
-    """
-    class_name = MODEL_CLASS_CONFIG[model_class]["class_name"]
-
-    if model_class == "qwen2vl":
-        return (
-            f'\n    "{model_name}": partial(\n'
-            f"        {class_name},\n"
-            f'        model_path="{model_path}",\n'
-            f"        min_pixels={min_pixels},\n"
-            f"        max_pixels={max_pixels},\n"
-            f"        use_custom_prompt=False,\n"
-            f"    ),\n"
-        )
-    else:
-        return (
-            f'\n    "{model_name}": partial(\n'
-            f"        {class_name},\n"
-            f'        model_path="{model_path}",\n'
-            f"    ),\n"
-        )
-
-
-def register_model(
+def register_qwen_model(
+    config_path: Path,
     model_path: str,
     model_name: str,
-    model_class: str,
-    vlmevalkit_dir: str,
     min_pixels: int,
     max_pixels: int,
 ) -> None:
-    """Register a custom model in VLMEvalKit's supported_VLM dictionary.
-
-    This patches the config.py file to add a new model entry that points
-    to a local checkpoint path.
+    """Register a Qwen2VL model by inserting into existing config section.
 
     Args:
-        model_path: Path to the fine-tuned model checkpoint.
+        config_path: Path to VLMEvalKit config.py.
+        model_path: Path to the model checkpoint.
         model_name: Name to register the model under.
-        model_class: Model class key (e.g., 'qwen2vl', 'llava').
-        vlmevalkit_dir: Path to VLMEvalKit installation directory.
-        min_pixels: Minimum pixel count for image processing (Qwen2VL only).
-        max_pixels: Maximum pixel count for image processing (Qwen2VL only).
+        min_pixels: Minimum pixel count for image processing.
+        max_pixels: Maximum pixel count for image processing.
     """
-    config_path = Path(vlmevalkit_dir) / "vlmeval" / "config.py"
-    if not config_path.exists():
-        logger.error(f"VLMEvalKit config not found at {config_path}")
-        sys.exit(1)
-
     config_content = config_path.read_text()
 
-    # Check if model is already registered
     if model_name in config_content:
         logger.info(f"Model '{model_name}' already registered in config")
         return
 
-    # Build the entry
-    entry = build_entry(model_name, model_path, model_class, min_pixels, max_pixels)
+    entry = (
+        f'\n    "{model_name}": partial(\n'
+        f"        Qwen2VLChat,\n"
+        f'        model_path="{model_path}",\n'
+        f"        min_pixels={min_pixels},\n"
+        f"        max_pixels={max_pixels},\n"
+        f"        use_custom_prompt=False,\n"
+        f"    ),\n"
+    )
 
-    # Find the right section to insert into
-    class_config = MODEL_CLASS_CONFIG[model_class]
-    marker = None
-    for candidate in class_config["markers"]:
-        if candidate in config_content:
-            marker = candidate
-            break
+    # Find the Qwen2-VL section and insert after an existing entry
+    for marker in ["Qwen2.5-VL-7B-Instruct", "Qwen2VLChat"]:
+        if marker in config_content:
+            marker_pos = config_content.index(marker)
+            insert_pos = config_content.find("),\n", marker_pos)
+            if insert_pos != -1:
+                insert_pos += len("),\n")
+                new_content = config_content[:insert_pos] + entry + config_content[insert_pos:]
+                config_path.write_text(new_content)
+                logger.info(f"Registered Qwen2VL model '{model_name}'")
+                return
 
-    if marker is None:
-        logger.error(
-            f"Could not find {class_config['class_name']} section in config.py. "
-            "VLMEvalKit version may be incompatible."
-        )
+    logger.error("Could not find Qwen2VLChat section in config.py")
+    sys.exit(1)
+
+
+def register_llava_model(
+    config_path: Path,
+    vlmevalkit_dir: str,
+    model_path: str,
+    model_name: str,
+) -> None:
+    """Register a LLaVA model using the custom HF wrapper.
+
+    Appends to the end of config.py to avoid complex insertion logic.
+
+    Args:
+        config_path: Path to VLMEvalKit config.py.
+        vlmevalkit_dir: Path to VLMEvalKit installation directory.
+        model_path: Path to the model checkpoint.
+        model_name: Name to register the model under.
+    """
+    config_content = config_path.read_text()
+
+    if model_name in config_content:
+        logger.info(f"Model '{model_name}' already registered in config")
+        return
+
+    # Copy the wrapper module into VLMEvalKit's vlm directory
+    wrapper_src = Path(__file__).parent / "llava_hf_wrapper.py"
+    wrapper_dst = Path(vlmevalkit_dir) / "vlmeval" / "vlm" / "llava_hf_wrapper.py"
+    if wrapper_src.exists():
+        wrapper_dst.write_text(wrapper_src.read_text())
+        logger.info(f"Copied LLaVA_HF wrapper to {wrapper_dst}")
+    else:
+        logger.error(f"LLaVA_HF wrapper not found at {wrapper_src}")
         sys.exit(1)
 
-    # Find the closing paren of the first matching entry after marker
-    marker_pos = config_content.index(marker)
-    # Find the next "),\n" after the marker to insert after a complete entry
-    insert_pos = config_content.find("),\n", marker_pos)
-    if insert_pos == -1:
-        logger.error("Could not find insertion point in config.py")
-        sys.exit(1)
+    # Append import + registration to the end of config.py
+    append_block = (
+        f"\n# Custom LLaVA-HF model registration\n"
+        f"from vlmeval.vlm.llava_hf_wrapper import LLaVA_HF\n"
+        f"supported_VLM['{model_name}'] = partial(LLaVA_HF, model_path='{model_path}')\n"
+    )
 
-    # Insert after the "),\n"
-    insert_pos += len("),\n")
-    new_content = config_content[:insert_pos] + entry + config_content[insert_pos:]
+    config_content += append_block
+    config_path.write_text(config_content)
+    logger.info(f"Registered LLaVA_HF model '{model_name}'")
 
-    config_path.write_text(new_content)
-    logger.info(f"Registered model '{model_name}' in {config_path}")
-    logger.info(f"  model_path: {model_path}")
-    logger.info(f"  model_class: {class_config['class_name']}")
+
+def register_llava_next_model(
+    config_path: Path,
+    model_path: str,
+    model_name: str,
+) -> None:
+    """Register a LLaVA-Next model in existing config section.
+
+    Args:
+        config_path: Path to VLMEvalKit config.py.
+        model_path: Path to the model checkpoint.
+        model_name: Name to register the model under.
+    """
+    config_content = config_path.read_text()
+
+    if model_name in config_content:
+        logger.info(f"Model '{model_name}' already registered in config")
+        return
+
+    entry = (
+        f'\n    "{model_name}": partial(\n'
+        f"        LLaVA_Next,\n"
+        f'        model_path="{model_path}",\n'
+        f"    ),\n"
+    )
+
+    for marker in ["llava_next_vicuna_7b", "LLaVA_Next, model_path"]:
+        if marker in config_content:
+            marker_pos = config_content.index(marker)
+            insert_pos = config_content.find("),\n", marker_pos)
+            if insert_pos != -1:
+                insert_pos += len("),\n")
+                new_content = config_content[:insert_pos] + entry + config_content[insert_pos:]
+                config_path.write_text(new_content)
+                logger.info(f"Registered LLaVA_Next model '{model_name}'")
+                return
+
+    logger.error("Could not find LLaVA_Next section in config.py")
+    sys.exit(1)
 
 
 def main() -> None:
@@ -250,14 +256,24 @@ def main() -> None:
             sys.exit(1)
         logger.info(f"Auto-detected model class: {model_class}")
 
-    register_model(
-        model_path=args.model_path,
-        model_name=args.model_name,
-        model_class=model_class,
-        vlmevalkit_dir=args.vlmevalkit_dir,
-        min_pixels=args.min_pixels,
-        max_pixels=args.max_pixels,
-    )
+    config_path = Path(args.vlmevalkit_dir) / "vlmeval" / "config.py"
+    if not config_path.exists():
+        logger.error(f"VLMEvalKit config not found at {config_path}")
+        sys.exit(1)
+
+    if model_class == "qwen2vl":
+        register_qwen_model(
+            config_path, args.model_path, args.model_name,
+            args.min_pixels, args.max_pixels,
+        )
+    elif model_class == "llava":
+        register_llava_model(
+            config_path, args.vlmevalkit_dir, args.model_path, args.model_name,
+        )
+    elif model_class == "llava_next":
+        register_llava_next_model(
+            config_path, args.model_path, args.model_name,
+        )
 
 
 if __name__ == "__main__":
