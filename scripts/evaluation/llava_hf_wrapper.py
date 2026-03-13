@@ -41,14 +41,14 @@ class LLaVA_HF(BaseModel):
 
             model = LlavaForConditionalGeneration.from_pretrained(
                 model_path,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 low_cpu_mem_usage=True,
-                use_flash_attention_2=True,
+                attn_implementation="flash_attention_2",
             )
-        except ImportError:
+        except (ImportError, ValueError):
             model = LlavaForConditionalGeneration.from_pretrained(
                 model_path,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
                 low_cpu_mem_usage=True,
             )
 

@@ -167,13 +167,7 @@ def register_llava_model(
         model_path: Path to the model checkpoint.
         model_name: Name to register the model under.
     """
-    config_content = config_path.read_text()
-
-    if model_name in config_content:
-        logger.info(f"Model '{model_name}' already registered in config")
-        return
-
-    # Copy the wrapper module into VLMEvalKit's vlm directory
+    # Always copy the wrapper module (may have been updated since last registration)
     wrapper_src = Path(__file__).parent / "llava_hf_wrapper.py"
     wrapper_dst = Path(vlmevalkit_dir) / "vlmeval" / "vlm" / "llava_hf_wrapper.py"
     if wrapper_src.exists():
@@ -182,6 +176,12 @@ def register_llava_model(
     else:
         logger.error(f"LLaVA_HF wrapper not found at {wrapper_src}")
         sys.exit(1)
+
+    config_content = config_path.read_text()
+
+    if model_name in config_content:
+        logger.info(f"Model '{model_name}' already registered in config")
+        return
 
     # Append import + registration to the end of config.py
     append_block = (

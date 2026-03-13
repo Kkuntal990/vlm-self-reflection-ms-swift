@@ -101,9 +101,9 @@ spec:
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/llava_1_5_mt_st_lvlm"
         - name: NUM_GPUS
-          value: "2"
+          value: "1"
         - name: BENCHMARKS
-          value: "all"
+          value: "ai2d,mme,mmmu_val,ocrbench,seedbench"
         - name: LIMIT
           value: "0"
 
@@ -115,12 +115,12 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "2"
-            memory: "48Gi"
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
             cpu: "3"
           limits:
-            nvidia.com/rtxa6000: "2"
-            memory: "56Gi"
+            nvidia.com/rtxa6000: "1"
+            memory: "36Gi"
             cpu: "3"
 
         volumeMounts:

@@ -102,7 +102,7 @@ spec:
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/qwen-eval-mt-st"
         - name: NUM_GPUS
-          value: "2"
+          value: "1"
         - name: BENCHMARKS
           value: "all"
         - name: LIMIT
@@ -116,13 +116,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "2"
-            memory: "48Gi"
-            cpu: "4"
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "2"
           limits:
-            nvidia.com/rtxa6000: "2"
-            memory: "64Gi"
-            cpu: "4"
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "2"
 
         volumeMounts:
         - name: cache-volume

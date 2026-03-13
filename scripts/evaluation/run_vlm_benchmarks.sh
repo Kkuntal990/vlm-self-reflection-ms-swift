@@ -298,12 +298,14 @@ run_vlmevalkit() {
         git clone https://github.com/open-compass/VLMEvalKit.git "${VLMEVALKIT_DIR}"
     fi
 
+    # Pre-install deps missing from non-standard PyPI mirrors (e.g. Aliyun)
+    echo "Pre-installing mirror-missing dependencies..."
+    pip install --index-url https://pypi.org/simple num2words openai-clip || true
+
     # Always run install to ensure all dependencies from requirements.txt are met.
     # VLMEvalKit frequently adds new deps; a stale editable install may be missing them.
     echo "Installing VLMEvalKit and dependencies..."
-    pip install -e "${VLMEVALKIT_DIR}" 2>&1 | tail -3
-    # Some deps (openai-clip, num2words) may not exist on non-standard PyPI mirrors
-    pip install --index-url https://pypi.org/simple openai-clip num2words 2>/dev/null || true
+    pip install -e "${VLMEVALKIT_DIR}" || { echo "ERROR: Failed to install VLMEvalKit"; exit 1; }
 
     # Register custom model
     echo "Registering custom model '${MODEL_NAME}'..."
