@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-llava-7b-base
+  name: eval-vlmevalkit-llava-7b-RL
   labels:
     app: ms-swift
     task: benchmark-evaluation
     framework: vlmevalkit
-    model: llava-7b-base
+    model: llava-7b-rl
 spec:
   backoffLimit: 2
   template:
@@ -106,12 +106,12 @@ spec:
         # Evaluation configuration
         - name: MODEL_PATH
           #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
-          value: "llava-hf/llava-1.5-7b-hf"
+          value: "/outputs/grpo_self_reflection_v1/final"
         - name: BASE_MODEL_PATH
-          value: ""  # Set to base model HF ID/path for LoRA adapter checkpoints
+          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
-          value: "LLaVa-7B-base"
+          value: "LLaVa-7B-RL"
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/vlmevalkit"
         - name: NUM_GPUS
