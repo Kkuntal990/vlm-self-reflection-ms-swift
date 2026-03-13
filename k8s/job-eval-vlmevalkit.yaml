@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-llava-7b-sft
+  name: eval-vlmevalkit-llava-7b-base
   labels:
     app: ms-swift
     task: benchmark-evaluation
     framework: vlmevalkit
-    model: llava-7b-sft
+    model: llava-7b-base
 spec:
   backoffLimit: 2
   template:
@@ -39,7 +39,6 @@ spec:
           echo "Num GPUs:    ${NUM_GPUS}"
           echo "Benchmarks:  ${BENCHMARKS}"
           echo "Batch Size:  ${BATCH_SIZE}"
-          echo "Limit:       ${LIMIT} (0 = all)"
           echo ""
 
           # Verify GPU availability
@@ -47,13 +46,14 @@ spec:
           nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
           echo ""
 
-          # Verify model checkpoint exists
-          if [ ! -d "${MODEL_PATH}" ]; then
-            echo "ERROR: Model checkpoint not found: ${MODEL_PATH}"
-            exit 1
+          # Verify model path (local dir or HuggingFace model ID)
+          if [ -d "${MODEL_PATH}" ]; then
+            echo "Local model checkpoint found:"
+            ls -lh "${MODEL_PATH}/" | head -5
+          else
+            echo "MODEL_PATH is not a local directory: ${MODEL_PATH}"
+            echo "Treating as HuggingFace model ID (will download at runtime)..."
           fi
-          echo "Model checkpoint found:"
-          ls -lh "${MODEL_PATH}/" | head -5
           echo ""
 
           # Create output directory
@@ -70,8 +70,7 @@ spec:
             --output-dir "${OUTPUT_DIR}" \
             --num-gpus "${NUM_GPUS}" \
             --benchmarks "${BENCHMARKS}" \
-            --batch-size "${BATCH_SIZE}" \
-            --limit "${LIMIT}"
+            --batch-size "${BATCH_SIZE}"
 
           echo ""
           echo "========================================="
@@ -101,9 +100,11 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
+          #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
+          value: "llava-hf/llava-1.5-7b-hf"
         - name: MODEL_NAME
-          value: "FireSFT-LLaVA-7B"
+          #value: "FireSFT-LLaVA-7B"
+          value: "LLaVa-7B-base"
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/vlmevalkit"
         - name: NUM_GPUS
@@ -112,8 +113,6 @@ spec:
           value: "all"
         - name: BATCH_SIZE
           value: "1"
-        - name: LIMIT
-          value: "0"
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED

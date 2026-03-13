@@ -315,6 +315,48 @@ run_vlmevalkit() {
         --model-name "${MODEL_NAME}" \
         --vlmevalkit-dir "${VLMEVALKIT_DIR}"
 
+    # VLMEvalKit has no native --limit flag. When LIMIT > 0, pre-download
+    # dataset TSVs and truncate to LIMIT rows before running inference.
+    if [ "${LIMIT}" -gt 0 ]; then
+        echo ""
+        echo "Applying sample limit (${LIMIT}) for VLMEvalKit..."
+        python -c "
+import os, sys
+from pathlib import Path
+from huggingface_hub import hf_hub_download
+
+limit = int(sys.argv[1])
+lmu_dir = Path.home() / 'LMUData'
+lmu_dir.mkdir(exist_ok=True)
+benchmarks = sys.argv[2:]
+
+for bench in benchmarks:
+    tsv_path = lmu_dir / f'{bench}.tsv'
+    if not tsv_path.exists():
+        print(f'Downloading {bench}.tsv ...')
+        try:
+            hf_hub_download(
+                repo_id='opencompass/VLMEvalKit',
+                filename=f'{bench}.tsv',
+                repo_type='dataset',
+                local_dir=str(lmu_dir),
+            )
+        except Exception as e:
+            print(f'Warning: Could not download {bench}: {e}')
+            continue
+    # Truncate: keep header + limit rows
+    with open(tsv_path, 'r') as f:
+        lines = []
+        for i, line in enumerate(f):
+            lines.append(line)
+            if i >= limit:  # header (0) + limit data rows
+                break
+    with open(tsv_path, 'w') as f:
+        f.writelines(lines)
+    print(f'Truncated {bench} to {len(lines)-1} samples')
+" "${LIMIT}" ${RESOLVED_BENCHMARKS}
+    fi
+
     echo ""
     echo "========================================="
     echo "Running VLMEvalKit Evaluation"
