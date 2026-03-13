@@ -303,6 +303,9 @@ run_vlmevalkit() {
         pip install -e "${VLMEVALKIT_DIR}"
     fi
 
+    # Install extra dependencies that VLMEvalKit doesn't declare
+    pip install num2words 2>/dev/null || true
+
     # Register custom model
     echo "Registering custom model '${MODEL_NAME}'..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
