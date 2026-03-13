@@ -38,6 +38,7 @@ OUTPUT_DIR="/outputs/benchmark_results"
 NUM_GPUS=2
 BENCHMARKS="all"
 LIMIT=0
+BATCH_SIZE=1
 VLMEVALKIT_DIR="/tmp/VLMEvalKit"
 
 # ========================================
@@ -45,10 +46,10 @@ VLMEVALKIT_DIR="/tmp/VLMEvalKit"
 # ========================================
 
 # VLMEvalKit benchmark names
-VLMEVALKIT_ALL="MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI"
+VLMEVALKIT_ALL="MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI GQA_TestDev_Balanced ScienceQA_TEST ChartQA_TEST HallusionBench"
 
 # lmms-eval benchmark names
-LMMS_EVAL_ALL="mmbench_en_dev,mme,seedbench,mmmu_val,mmvet,ai2d,ocrbench,mathvista_testmini"
+LMMS_EVAL_ALL="mmbench_en_dev,mme,seedbench,mmmu_val,mmvet,ai2d,ocrbench,mathvista_testmini,gqa,scienceqa_img,chartqa,hallusionbench"
 
 # Mapping for individual benchmark selection
 declare -A VLMEVALKIT_MAP=(
@@ -60,6 +61,10 @@ declare -A VLMEVALKIT_MAP=(
     ["ai2d"]="AI2D_TEST"
     ["ocrbench"]="OCRBench"
     ["mathvista"]="MathVista_MINI"
+    ["gqa"]="GQA_TestDev_Balanced"
+    ["scienceqa"]="ScienceQA_TEST"
+    ["chartqa"]="ChartQA_TEST"
+    ["hallusionbench"]="HallusionBench"
 )
 
 declare -A LMMS_EVAL_MAP=(
@@ -71,6 +76,10 @@ declare -A LMMS_EVAL_MAP=(
     ["ai2d"]="ai2d"
     ["ocrbench"]="ocrbench"
     ["mathvista"]="mathvista_testmini"
+    ["gqa"]="gqa"
+    ["scienceqa"]="scienceqa_img"
+    ["chartqa"]="chartqa"
+    ["hallusionbench"]="hallusionbench"
 )
 
 # ========================================
@@ -106,6 +115,10 @@ while [[ $# -gt 0 ]]; do
             LIMIT="$2"
             shift 2
             ;;
+        --batch-size)
+            BATCH_SIZE="$2"
+            shift 2
+            ;;
         --model-type)
             MODEL_TYPE="$2"
             shift 2
@@ -126,8 +139,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --output-dir       Output directory (default: /outputs/benchmark_results)"
             echo "  --num-gpus         Number of GPUs (default: 2)"
             echo "  --benchmarks       Comma-separated list or 'all' (default: all)"
-            echo "                     Options: mmbench,mme,seedbench,mmmu,mmvet,ai2d,ocrbench,mathvista"
+            echo "                     Options: mmbench,mme,seedbench,mmmu,mmvet,ai2d,ocrbench,mathvista,"
+            echo "                              gqa,scienceqa,chartqa,hallusionbench"
             echo "  --limit            Limit samples per benchmark, 0=all (default: 0)"
+            echo "  --batch-size       Batch size for inference (default: 1)"
             echo "  --vlmevalkit-dir   VLMEvalKit install directory (default: /tmp/VLMEvalKit)"
             exit 0
             ;;
@@ -200,6 +215,7 @@ echo "Model Type:  ${MODEL_TYPE}"
 echo "Output Dir:  ${OUTPUT_DIR}"
 echo "Num GPUs:    ${NUM_GPUS}"
 echo "Benchmarks:  ${BENCHMARKS}"
+echo "Batch Size:  ${BATCH_SIZE}"
 echo "Limit:       ${LIMIT} (0 = all)"
 echo ""
 
@@ -305,6 +321,9 @@ run_vlmevalkit() {
     cmd="${cmd} --model ${MODEL_NAME}"
     cmd="${cmd} --work-dir ${OUTPUT_DIR}"
     cmd="${cmd} --verbose"
+    if [ "${BATCH_SIZE}" -gt 1 ]; then
+        cmd="${cmd} --nproc ${BATCH_SIZE}"
+    fi
 
     echo "Command: ${cmd}"
     echo ""
@@ -347,7 +366,7 @@ run_lmms_eval() {
     cmd="${cmd} --model ${MODEL_TYPE}"
     cmd="${cmd} --model_args ${model_args}"
     cmd="${cmd} --tasks ${RESOLVED_BENCHMARKS}"
-    cmd="${cmd} --batch_size 1"
+    cmd="${cmd} --batch_size ${BATCH_SIZE}"
     cmd="${cmd} --output_path ${OUTPUT_DIR}"
     cmd="${cmd} --log_samples"
 

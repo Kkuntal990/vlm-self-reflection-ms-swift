@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-qwen2-5vl-7b
+  name: eval-vlmevalkit-llava-7b-sft
   labels:
     app: ms-swift
     task: benchmark-evaluation
     framework: vlmevalkit
-    model: qwen2-5-vl-7b
+    model: llava-7b-sft
 spec:
   backoffLimit: 2
   template:
@@ -38,6 +38,7 @@ spec:
           echo "Output Dir:  ${OUTPUT_DIR}"
           echo "Num GPUs:    ${NUM_GPUS}"
           echo "Benchmarks:  ${BENCHMARKS}"
+          echo "Batch Size:  ${BATCH_SIZE}"
           echo "Limit:       ${LIMIT} (0 = all)"
           echo ""
 
@@ -69,6 +70,7 @@ spec:
             --output-dir "${OUTPUT_DIR}" \
             --num-gpus "${NUM_GPUS}" \
             --benchmarks "${BENCHMARKS}" \
+            --batch-size "${BATCH_SIZE}" \
             --limit "${LIMIT}"
 
           echo ""
@@ -99,15 +101,17 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-data2/v11-20260128-011424/checkpoint-3752"
+          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
         - name: MODEL_NAME
-          value: "FireSFT-Qwen2-5-VL-7B"
+          value: "FireSFT-LLaVA-7B"
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/vlmevalkit"
         - name: NUM_GPUS
           value: "2"
         - name: BENCHMARKS
           value: "all"
+        - name: BATCH_SIZE
+          value: "1"
         - name: LIMIT
           value: "0"
 
@@ -120,16 +124,18 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "2"
-            memory: "16Gi"
+            memory: "32Gi"
             cpu: "4"
           limits:
             nvidia.com/rtxa6000: "2"
-            memory: "16Gi"
+            memory: "32Gi"
             cpu: "4"
 
         volumeMounts:
         - name: outputs-volume
           mountPath: /outputs
+        - name: cache-volume
+          mountPath: /cache
         - name: dev-shm
           mountPath: /dev/shm
 
@@ -151,11 +157,11 @@ spec:
       volumes:
       - name: cache-volume
         emptyDir:
-          sizeLimit: 100Gi
+          sizeLimit: 200Gi
       - name: outputs-volume
         persistentVolumeClaim:
           claimName: ms-swift-outputs-pvc
       - name: dev-shm
         emptyDir:
           medium: Memory
-          sizeLimit: 4Gi
+          sizeLimit: 16Gi
