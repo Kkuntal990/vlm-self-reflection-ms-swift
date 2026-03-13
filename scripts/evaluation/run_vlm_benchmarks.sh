@@ -304,7 +304,8 @@ run_vlmevalkit() {
     fi
 
     # Install extra dependencies that VLMEvalKit doesn't declare
-    pip install num2words 2>/dev/null || true
+    # Use standard PyPI as fallback since some mirrors (e.g. Aliyun) may not have these
+    pip install num2words 2>/dev/null || pip install --index-url https://pypi.org/simple num2words || true
 
     # Register custom model
     echo "Registering custom model '${MODEL_NAME}'..."
