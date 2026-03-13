@@ -259,7 +259,10 @@ def main() -> None:
     # Auto-detect model class if not specified
     model_class = args.model_class
     if not model_class:
+        # Try model_path first, then fall back to base_model_path (for LoRA adapters)
         model_class = detect_model_class(args.model_path)
+        if not model_class and args.base_model_path:
+            model_class = detect_model_class(args.base_model_path)
         if not model_class:
             logger.error(
                 "Could not auto-detect model class from path. "
