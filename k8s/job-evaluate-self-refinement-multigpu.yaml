@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-self-refinement-llava-st-mt-lvlm
+  name: eval-job-self-refinement-llava-st-mt-rl
   labels:
     app: ms-swift
     task: self-refinement-evaluation

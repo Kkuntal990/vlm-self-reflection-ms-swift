@@ -1,0 +1,302 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fire-upload-hf-job-v10
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: upload-container
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        resources:
+          limits:
+            memory: "16Gi"
+            cpu: "4"
+          requests:
+            memory: "16Gi"
+            cpu: "4"
+
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            set -e
+
+            # ============================================================
+            # Step 1: Extract referenced image paths from JSONLs
+            # ============================================================
+            echo "=== Step 1: Extract image paths from JSONLs ==="
+
+            python3 -c "
+            import json, os, sys
+            from collections import defaultdict
+
+            STAGING = '/outputs/hf_upload_staging'
+            JSONLS = [
+                f'{STAGING}/fire_messages_train_last_loss_only.jsonl',
+                f'{STAGING}/fire_last_response_test.jsonl',
+            ]
+
+            dataset_images = defaultdict(set)
+            for jf in JSONLS:
+                print(f'Parsing {os.path.basename(jf)}...', flush=True)
+                with open(jf) as f:
+                    for line in f:
+                        d = json.loads(line)
+                        for img in d.get('images', []):
+                            rel = img.replace('/outputs/image_base/', '')
+                            ds = rel.split('/')[0]
+                            dataset_images[ds].add(rel)
+
+            os.makedirs('/tmp/manifests', exist_ok=True)
+            for ds, paths in sorted(dataset_images.items()):
+                manifest = f'/tmp/manifests/{ds}.txt'
+                with open(manifest, 'w') as f:
+                    for p in sorted(paths):
+                        f.write(f'image_base/{p}\n')
+                print(f'  {ds}: {len(paths)} images', flush=True)
+            print(f'Total datasets: {len(dataset_images)}', flush=True)
+            "
+
+            echo ""
+            echo "=== Step 2: Create tar archives per dataset ==="
+
+            mkdir -p /tmp/tars
+            for manifest in /tmp/manifests/*.txt; do
+              ds=$(basename "$manifest" .txt)
+              tarfile="/tmp/tars/image_base_${ds}.tar"
+              count=$(wc -l < "$manifest")
+
+              if [ -f "$tarfile" ]; then
+                echo "[${ds}] Archive already exists, skipping"
+                continue
+              fi
+
+              echo "[${ds}] Archiving ${count} files..."
+
+              # Use tar with file list from manifest (no compression for speed)
+              # -C to change into staging dir so paths are relative
+              tar cf "$tarfile" \
+                -C /outputs/hf_upload_staging \
+                -T "$manifest" \
+                2>&1 || echo "[${ds}] WARNING: tar had errors (some files may be missing)"
+
+              if [ -f "$tarfile" ]; then
+                size=$(du -h "$tarfile" | cut -f1)
+                echo "[${ds}] Archive created: ${size}"
+              else
+                echo "[${ds}] ERROR: tar failed completely"
+              fi
+            done
+
+            echo ""
+            echo "=== Step 3: Upload to HuggingFace ==="
+
+            cat > /tmp/upload_tars.py << 'PYEOF'
+            #!/usr/bin/env python3
+            """Upload tar.gz archives and JSONLs to HuggingFace."""
+
+            import logging
+            import os
+            import sys
+            import time
+
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(asctime)s - %(levelname)s - %(message)s",
+                handlers=[logging.StreamHandler(sys.stdout)],
+            )
+            logger = logging.getLogger(__name__)
+
+            HF_TOKEN = "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"
+            REPO_ID = "Kkuntal990/vlm-self-reflect-data"
+            STAGING_DIR = "/outputs/hf_upload_staging"
+            TAR_DIR = "/tmp/tars"
+            JSONL_FILES = [
+                "fire_messages_train_last_loss_only.jsonl",
+                "fire_last_response_test.jsonl",
+            ]
+
+
+            def get_already_uploaded(api: "HfApi", repo_id: str) -> set[str]:
+                """Get set of already uploaded file paths from the repo.
+
+                Args:
+                    api: HuggingFace API instance
+                    repo_id: Dataset repo ID
+
+                Returns:
+                    Set of relative file paths already in the repo
+                """
+                logger.info("Fetching already uploaded files...")
+                uploaded = set()
+                try:
+                    for item in api.list_repo_tree(
+                        repo_id, repo_type="dataset", recursive=True
+                    ):
+                        if hasattr(item, "size"):
+                            uploaded.add(item.path)
+                except Exception as e:
+                    logger.warning(f"Could not fetch repo tree: {e}")
+                logger.info(f"Found {len(uploaded)} files already in repo")
+                return uploaded
+
+
+            def upload_file(
+                api: "HfApi",
+                repo_id: str,
+                local_path: str,
+                path_in_repo: str,
+            ) -> bool:
+                """Upload a single file to HuggingFace with retries.
+
+                Args:
+                    api: HuggingFace API instance
+                    repo_id: Dataset repo ID
+                    local_path: Local file path
+                    path_in_repo: Path in the HF repo
+
+                Returns:
+                    True if upload succeeded
+                """
+                size_mb = os.path.getsize(local_path) / 1024 / 1024
+                for attempt in range(3):
+                    try:
+                        logger.info(
+                            f"  Uploading {path_in_repo} "
+                            f"({size_mb:.1f}MB) attempt {attempt + 1}..."
+                        )
+                        api.upload_file(
+                            path_or_fileobj=local_path,
+                            path_in_repo=path_in_repo,
+                            repo_id=repo_id,
+                            repo_type="dataset",
+                            commit_message=f"Upload {path_in_repo}",
+                        )
+                        return True
+                    except Exception as e:
+                        logger.error(
+                            f"  {path_in_repo} attempt {attempt + 1} "
+                            f"failed: {e}"
+                        )
+                        if attempt < 2:
+                            time.sleep(30 * (attempt + 1))
+                return False
+
+
+            def main() -> None:
+                """Main entry point."""
+                from huggingface_hub import HfApi
+
+                os.environ["HF_TOKEN"] = HF_TOKEN
+                api = HfApi(token=HF_TOKEN)
+
+                logger.info("=== Upload tars + JSONLs to HF ===")
+                logger.info(f"Repo: {REPO_ID}")
+
+                # Ensure repo exists
+                try:
+                    api.create_repo(
+                        REPO_ID, repo_type="dataset", exist_ok=True
+                    )
+                    logger.info(f"Repo {REPO_ID} ready")
+                except Exception as e:
+                    logger.info(f"Repo check: {e}")
+
+                already_uploaded = get_already_uploaded(api, REPO_ID)
+
+                stats = {"uploaded": 0, "skipped": 0, "failed": 0}
+
+                # Upload tar.gz files
+                tar_files = sorted(
+                    f for f in os.listdir(TAR_DIR)
+                    if f.endswith(".tar")
+                )
+                logger.info(f"Found {len(tar_files)} tar archives to upload")
+
+                for tf in tar_files:
+                    if tf in already_uploaded:
+                        logger.info(f"[SKIP] {tf} already in repo")
+                        stats["skipped"] += 1
+                        continue
+
+                    local_path = os.path.join(TAR_DIR, tf)
+                    start = time.time()
+                    ok = upload_file(api, REPO_ID, local_path, tf)
+                    elapsed = time.time() - start
+
+                    if ok:
+                        stats["uploaded"] += 1
+                        logger.info(f"[OK] {tf} uploaded in {elapsed:.1f}s")
+                    else:
+                        stats["failed"] += 1
+                        logger.error(f"[FAIL] {tf}")
+
+                # Upload JSONL files
+                for jf in JSONL_FILES:
+                    if jf in already_uploaded:
+                        logger.info(f"[SKIP] {jf} already in repo")
+                        stats["skipped"] += 1
+                        continue
+
+                    local_path = os.path.join(STAGING_DIR, jf)
+                    ok = upload_file(api, REPO_ID, local_path, jf)
+                    if ok:
+                        stats["uploaded"] += 1
+                        logger.info(f"[OK] {jf} uploaded")
+                    else:
+                        stats["failed"] += 1
+                        logger.error(f"[FAIL] {jf}")
+
+                logger.info(
+                    f"=== Done === "
+                    f"uploaded: {stats['uploaded']}, "
+                    f"skipped: {stats['skipped']}, "
+                    f"failed: {stats['failed']}"
+                )
+                logger.info(
+                    f"Dataset: https://huggingface.co/datasets/{REPO_ID}"
+                )
+
+
+            if __name__ == "__main__":
+                main()
+            PYEOF
+
+            python /tmp/upload_tars.py
+            echo "COMPLETE"
+
+        volumeMounts:
+          - name: outputs-volume
+            mountPath: /outputs
+
+        env:
+          - name: PYTHONUNBUFFERED
+            value: "1"
+
+      nodeSelector:
+        kubernetes.io/hostname: gpn-fiona-mizzou-1.rnet.missouri.edu
+
+      tolerations:
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+        - effect: NoSchedule
+          key: nautilus.io/hardware
+          operator: Equal
+          value: large-gpu
+        - effect: PreferNoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
+
+      volumes:
+        - name: outputs-volume
+          persistentVolumeClaim:
+            claimName: ms-swift-outputs-pvc

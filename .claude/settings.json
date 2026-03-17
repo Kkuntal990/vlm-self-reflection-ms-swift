@@ -7,7 +7,18 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(uv run ruff format:*)",
-      "WebFetch(domain:arxiv.org)"
+      "WebFetch(domain:arxiv.org)",
+      "Bash(for pkg in torch transformers trl vllm peft accelerate datasets)",
+      "Bash(do echo \"=== $pkg ===\")",
+      "Bash(for pkg in numpy pillow tqdm flashinfer-python cupy-cuda12x ray vllm transformers tokenizers sentencepiece)",
+      "Bash(for pkg in nvidia-cuda-runtime-cu12 nvidia-cudnn-cu12 nvidia-nccl-cu12 triton openai wandb)",
+      "Read(//^name = /**)",
+      "Bash(kubectl delete job fire-upload-hf-job)",
+      "Bash(kubectl delete job fire-upload-hf-job-resume)",
+      "Bash(kubectl delete job fire-upload-hf-job-v2)"
+    ],
+    "additionalDirectories": [
+      "/private/tmp"
     ]
   }
 }

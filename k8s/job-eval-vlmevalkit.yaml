@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-llava-7b-RL
+  name: eval-vlmevalkit-llava-7b-st
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -105,17 +105,25 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
+          #value: "llava-hf/llava-1.5-7b-hf"
           #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
-          value: "/outputs/grpo_self_reflection_v1/final"
+          #value: "/outputs/grpo_self_reflection_v1/final"
+          value: "outputs/llava-7b-fire-full-sft-single-turn/v0-20260208-031455/checkpoint-1485"
         - name: BASE_MODEL_PATH
-          value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
+          value: ""
+        # - name: MODEL_PATH
+        #   #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
+        #   #value: "/outputs/grpo_self_reflection_v1/final"
+        #   value: ""
+        # - name: BASE_MODEL_PATH
+         # value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
-          value: "LLaVa-7B-RL"
+          value: "LLaVa-7B-ST"
         - name: OUTPUT_DIR
           value: "/outputs/benchmark_results/vlmevalkit"
         - name: NUM_GPUS
-          value: "2"
+          value: "1"
         - name: BENCHMARKS
           value: "all"
         - name: BATCH_SIZE
@@ -129,13 +137,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "2"
+            nvidia.com/rtxa6000: "1"
             memory: "32Gi"
-            cpu: "4"
+            cpu: "2"
           limits:
-            nvidia.com/rtxa6000: "2"
+            nvidia.com/rtxa6000: "1"
             memory: "32Gi"
-            cpu: "4"
+            cpu: "2"
 
         volumeMounts:
         - name: outputs-volume

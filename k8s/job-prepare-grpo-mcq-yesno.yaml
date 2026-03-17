@@ -1,0 +1,160 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prepare-grpo-mcq-yesno-job
+  labels:
+    app: ms-swift
+    task: data-prep
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: data-prep
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: prep
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "MCQ + Yes/No GRPO Dataset Preparation"
+          echo "========================================="
+          echo "Model:       ${MODEL_ID}"
+          echo "Output dir:  ${OUTPUT_DIR}"
+          echo "Image dir:   ${IMAGE_DIR}"
+          echo "Max samples: ${MAX_SAMPLES} (0 = all, per dataset)"
+          echo "Datasets:    ${DATASETS}"
+          echo "========================================="
+          echo ""
+
+          nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+          echo ""
+
+          # Ensure HuggingFace datasets library is available
+          pip install -q datasets Pillow tqdm 2>&1 | tail -3
+
+          mkdir -p "${OUTPUT_DIR}" "${IMAGE_DIR}"
+
+          python /workspace/scripts/data_prep/prepare_grpo_mcq_yesno.py \
+            --output_dir  "${OUTPUT_DIR}" \
+            --image_dir   "${IMAGE_DIR}" \
+            --model_id    "${MODEL_ID}" \
+            --batch_size  "${BATCH_SIZE}" \
+            --max_samples "${MAX_SAMPLES}" \
+            --val_fraction "${VAL_FRACTION}" \
+            --seed        "${SEED}" \
+            --datasets    "${DATASETS}"
+
+          echo ""
+          echo "========================================="
+          echo "Done — output files:"
+          ls -lh "${OUTPUT_DIR}"/*.jsonl
+          echo ""
+          echo "Train sample count: $(wc -l < "${OUTPUT_DIR}/train.jsonl")"
+          echo "Val   sample count: $(wc -l < "${OUTPUT_DIR}/val.jsonl")"
+          echo ""
+          echo "First train sample:"
+          head -1 "${OUTPUT_DIR}/train.jsonl" | python -m json.tool
+          echo "========================================="
+
+        env:
+        # ============================================
+        # MODEL
+        # ============================================
+        - name: MODEL_ID
+          value: "/outputs/qwen2_5vl-7b-fire-full-sft-4gpu-feedback-training-single-turn-data2/v18-20260129-161955/checkpoint-3500"
+
+        # ============================================
+        # OUTPUT PATHS
+        # ============================================
+        - name: OUTPUT_DIR
+          value: "/outputs/grpo_mcq_yesno"
+        - name: IMAGE_DIR
+          value: "/outputs/grpo_mcq_yesno/images"
+
+        # ============================================
+        # DATASET CONFIGURATION
+        # ============================================
+        # Comma-separated list: pixel_reasoner,mme_cot,rlaif_v,visco
+        - name: DATASETS
+          value: "pixel_reasoner,mme_cot,rlaif_v,visco"
+
+        # Samples per dataset (0 = all)
+        - name: MAX_SAMPLES
+          value: "0"
+
+        # Fraction of PixelReasoner + RLAIF-V held out for val
+        - name: VAL_FRACTION
+          value: "0.1"
+
+        # ============================================
+        # INFERENCE
+        # ============================================
+        - name: BATCH_SIZE
+          value: "16"
+        - name: SEED
+          value: "42"
+
+        # ============================================
+        # HuggingFace / runtime
+        # ============================================
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+        - name: HF_HOME
+          value: "/cache/huggingface"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+        resources:
+          requests:
+            nvidia.com/rtxa6000: "1"
+            memory: "64Gi"
+            cpu: "8"
+          limits:
+            nvidia.com/rtxa6000: "1"
+            memory: "64Gi"
+            cpu: "8"
+
+        volumeMounts:
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: cache-volume
+          mountPath: /cache
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      tolerations:
+      - key: nautilus.io/reservation
+        operator: Exists
+        effect: NoSchedule
+      - key: nautilus.io/issue
+        operator: Exists
+        effect: NoSchedule
+
+      volumes:
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-cache-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 16Gi
