@@ -156,7 +156,7 @@ swift sft \
     --model "${MODEL_ID}" \
     --train_type full \
     --dataset ${DATASET_PATH} \
-    --split_dataset_ratio 0.05 \
+    --split_dataset_ratio 0 \
     --max_length "${MAX_LEN}" \
     --loss_scale "${LOSS_SCALE}" \
     --per_device_train_batch_size "${BATCH}" \
