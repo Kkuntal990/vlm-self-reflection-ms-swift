@@ -374,11 +374,22 @@ for bench in benchmarks:
     echo "Running VLMEvalKit Evaluation"
     echo "========================================="
 
+    # Create .env file for VLMEvalKit (enables GPT-based answer extraction)
+    if [ -n "${OPENAI_API_KEY:-}" ]; then
+        echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > "${VLMEVALKIT_DIR}/.env"
+        if [ -n "${OPENAI_API_BASE:-}" ]; then
+            echo "OPENAI_API_BASE=${OPENAI_API_BASE}" >> "${VLMEVALKIT_DIR}/.env"
+        fi
+        echo "Created .env with API key for answer extraction"
+    fi
+
     local cmd="torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py"
     cmd="${cmd} --data ${RESOLVED_BENCHMARKS}"
     cmd="${cmd} --model ${MODEL_NAME}"
     cmd="${cmd} --work-dir ${OUTPUT_DIR}"
     cmd="${cmd} --verbose"
+    cmd="${cmd} --reuse"
+    cmd="${cmd} --judge gpt-4o-mini"
     if [ "${BATCH_SIZE}" -gt 1 ]; then
         cmd="${cmd} --nproc ${BATCH_SIZE}"
     fi

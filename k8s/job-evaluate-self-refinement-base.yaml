@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-job-self-refinement-llava-st-mt-rl
+  name: eval-job-self-refinement-qwen25vl-base
   labels:
     app: ms-swift
     task: self-refinement-evaluation
@@ -73,17 +73,20 @@ spec:
 
           # Fix missing model_type in config.json (ms-swift merged checkpoints may omit it)
           python3 -c "
-          import json
+          import json, os
           cfg_path = '${MODEL_PATH}/config.json'
-          with open(cfg_path) as f:
-              cfg = json.load(f)
-          if 'model_type' not in cfg:
-              cfg['model_type'] = 'qwen2_5_vl'
-              with open(cfg_path, 'w') as f:
-                  json.dump(cfg, f, indent=2)
-              print(f'Added model_type=qwen2_5_vl to {cfg_path}')
+          if not os.path.exists(cfg_path):
+              print(f'Skipping config fix: {cfg_path} not found (HuggingFace model ID)')
           else:
-              print(f'model_type already set to: {cfg[\"model_type\"]}')
+              with open(cfg_path) as f:
+                  cfg = json.load(f)
+              if 'model_type' not in cfg:
+                  cfg['model_type'] = 'qwen2_5_vl'
+                  with open(cfg_path, 'w') as f:
+                      json.dump(cfg, f, indent=2)
+                  print(f'Added model_type=qwen2_5_vl to {cfg_path}')
+              else:
+                  print(f'model_type already set to: {cfg[\"model_type\"]}')
           "
 
           # Create output directory
@@ -144,13 +147,11 @@ spec:
         # Model and dataset paths
         - name: MODEL_PATH
           #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
-          value: "/outputs/qwen-7b-fire-sft-thought-v1/v1-20260319-093257/checkpoint-1564"
-        # - name: BASE_MODEL_PATH
-        #   value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
+          value: "Qwen/Qwen2.5-VL-7B-Instruct"
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v5/qwen-base-mt-v1.jsonl"
+          value: "/outputs/inference_v5/qwen25vl-base-mt-v1.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 
@@ -170,9 +171,9 @@ spec:
 
         # Batch and parallelism (batch_size per GPU)
         - name: BATCH_SIZE
-          value: "8"
+          value: "16"
         - name: NUM_GPUS
-          value: "2"
+          value: "4"
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED
@@ -184,13 +185,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/rtxa6000: "2"
-            memory: "32Gi"
-            cpu: "4"
+            nvidia.com/a100: "4"
+            memory: "64Gi"
+            cpu: "8"
           limits:
-            nvidia.com/rtxa6000: "2"
-            memory: "40Gi"
-            cpu: "4"
+            nvidia.com/a100: "4"
+            memory: "64Gi"
+            cpu: "8"
 
         volumeMounts:
         - name: outputs-volume
