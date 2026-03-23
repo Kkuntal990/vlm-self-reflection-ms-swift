@@ -50,7 +50,7 @@ spec:
           # Start LoRA training
           echo "Starting LoRA fine-tuning..."
           echo ""
-          /workspace/scripts/training/run_lora_sft_qwen25vl.sh
+          bash /workspace/scripts/training/run_lora_sft_qwen25vl.sh
 
         resources:
           requests:

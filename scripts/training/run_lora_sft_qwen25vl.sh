@@ -21,7 +21,7 @@ MODEL_ID="${MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct}"
 # ============================================
 # Dataset Configuration
 # ============================================
-DATASET_PATH="${DATASET_PATH:-/outputs/mixed_training_v1/mixed_training_v1.jsonl}"
+DATASET_PATH="${DATASET_PATH:?ERROR: DATASET_PATH must be set via env var}"
 
 # ============================================
 # Sequence and Vision Configuration
@@ -51,6 +51,7 @@ LR="${LR:-1e-4}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.05}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
+# default = loss on all assistant turns; last_round = loss only on final assistant turn
 LOSS_SCALE="${LOSS_SCALE:-default}"
 DEEPSPEED="${DEEPSPEED:-zero2}"
 PACKING="${PACKING:-false}"
@@ -157,6 +158,7 @@ swift sft \
     --max_length "${MAX_LEN}" \
     --loss_scale "${LOSS_SCALE}" \
     --per_device_train_batch_size "${BATCH}" \
+    --per_device_eval_batch_size "${BATCH}" \
     --gradient_accumulation_steps "${GRAD_ACC}" \
     --num_train_epochs "${EPOCHS}" \
     --learning_rate "${LR}" \
