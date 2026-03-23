@@ -150,7 +150,7 @@ spec:
         - name: DATASET_PATH
           value: "/outputs/fire_preprocessed_v3/fire_messages_test.jsonl"
         - name: OUTPUT_PATH
-          value: "/outputs/inference_v5/qwen-base-mt-v1.jsonl"
+          value: "/outputs/inference_v5/qwen-thought-mt-v1.jsonl"
         - name: IMAGE_BASE_DIR
           value: "/outputs/image_base"
 

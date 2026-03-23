@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-thought-mt
+  name: eval-vlmevalkit-thought-openended
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -60,22 +60,74 @@ spec:
           # Create output directory
           mkdir -p "${OUTPUT_DIR}"
 
-          # Run evaluation using the unified script
-          echo "Starting VLMEvalKit evaluation..."
-          echo ""
+          # Setup VLMEvalKit
+          VLMEVALKIT_DIR="/tmp/VLMEvalKit"
+          if [ ! -d "${VLMEVALKIT_DIR}" ]; then
+            git clone https://github.com/open-compass/VLMEvalKit.git "${VLMEVALKIT_DIR}"
+          fi
+          pip install --index-url https://pypi.org/simple num2words openai-clip || true
+          pip install -e "${VLMEVALKIT_DIR}" || exit 1
 
-          EVAL_CMD="bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
-            --framework vlmevalkit \
+          # Fix missing model_type in config.json
+          python3 -c "
+          import json, os
+          cfg_path = '${MODEL_PATH}/config.json'
+          if os.path.exists(cfg_path):
+              with open(cfg_path) as f:
+                  cfg = json.load(f)
+              if 'model_type' not in cfg:
+                  cfg['model_type'] = 'qwen2_5_vl'
+                  with open(cfg_path, 'w') as f:
+                      json.dump(cfg, f, indent=2)
+                  print(f'Added model_type=qwen2_5_vl to {cfg_path}')
+          "
+
+          # Register model
+          python /workspace/scripts/evaluation/register_vlmevalkit_model.py \
             --model-path ${MODEL_PATH} \
             --model-name ${MODEL_NAME} \
-            --output-dir ${OUTPUT_DIR} \
-            --num-gpus ${NUM_GPUS} \
-            --benchmarks ${BENCHMARKS} \
-            --batch-size ${BATCH_SIZE}"
-          if [ -n "${BASE_MODEL_PATH:-}" ]; then
-            EVAL_CMD="${EVAL_CMD} --base-model-path ${BASE_MODEL_PATH}"
+            --vlmevalkit-dir ${VLMEVALKIT_DIR}
+
+          # Patch: keep use_custom_prompt=False, just add system_prompt
+          python3 << 'PYEOF'
+          import os
+          config_path = os.environ.get('VLMEVALKIT_DIR', '/tmp/VLMEvalKit') + '/vlmeval/config.py'
+          model_name = os.environ.get('MODEL_NAME', '')
+          system_prompt = os.environ.get('SYSTEM_PROMPT', '')
+          with open(config_path) as f:
+              content = f.read()
+          idx = content.find(model_name)
+          if idx != -1:
+              pos = content.find('use_custom_prompt=False,', idx)
+              end = content.find('),', idx)
+              if pos != -1 and (end == -1 or pos < end):
+                  old = 'use_custom_prompt=False,'
+                  new = f'use_custom_prompt=False,\n        system_prompt="{system_prompt}",'
+                  content = content[:pos] + new + content[pos+len(old):]
+                  with open(config_path, 'w') as f:
+                      f.write(content)
+                  print(f'Patched {model_name}: use_custom_prompt=False + system_prompt')
+              else:
+                  print('WARNING: use_custom_prompt=False not found in model entry')
+          else:
+              print(f'WARNING: model {model_name} not found in config')
+          PYEOF
+
+          # Create .env for API access
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > "${VLMEVALKIT_DIR}/.env"
+            echo "OPENAI_API_BASE=${OPENAI_API_BASE}" >> "${VLMEVALKIT_DIR}/.env"
           fi
-          eval "${EVAL_CMD}"
+
+          # Run VLMEvalKit directly with raw dataset names
+          echo "Starting VLMEvalKit evaluation..."
+          torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py \
+            --data MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI GQA_TestDev_Balanced ScienceQA_TEST ChartQA_TEST HallusionBench LLaVA_Bench MMHal \
+            --model ${MODEL_NAME} \
+            --work-dir ${OUTPUT_DIR} \
+            --verbose \
+            --reuse \
+            --judge gpt-4o-mini
 
           echo ""
           echo "========================================="
@@ -101,7 +153,7 @@ spec:
               key: key
               optional: true
         - name: OPENAI_API_BASE
-          value: "https://openrouter.ai/api/v1"
+          value: "https://openrouter.ai/api/v1/chat/completions"
 
         # Cache directories
         - name: HF_HOME
@@ -129,15 +181,19 @@ spec:
          # value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
-          value: "QWEN-2-5Vl-thought-MT"
+          value: "QWEN-2-5Vl-thought-MT-v3"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/vlmevalkit"
+          value: "/outputs/benchmark_results/vlmevalkit_v3"
         - name: NUM_GPUS
           value: "1"
         - name: BENCHMARKS
-          value: "mmmu,mmvet,ai2d,ocrbench,mathvista,gqa,scienceqa,chartqa,hallusionbench"
+          value: "llava_bench,mmhal"
         - name: BATCH_SIZE
           value: "1"
+
+        # System prompt for FT model
+        - name: SYSTEM_PROMPT
+          value: 'You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user''s instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness.'
 
         # Python and CUDA settings
         - name: PYTHONUNBUFFERED
@@ -148,11 +204,11 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "1"
-            memory: "16Gi"
+            memory: "14Gi"
             cpu: "2"
           limits:
             nvidia.com/rtxa6000: "1"
-            memory: "16Gi"
+            memory: "14Gi"
             cpu: "2"
 
         volumeMounts:

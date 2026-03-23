@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-qwen25vl-base
+  name: eval-vlmevalkit-base-openended
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -60,22 +60,39 @@ spec:
           # Create output directory
           mkdir -p "${OUTPUT_DIR}"
 
-          # Run evaluation using the unified script
-          echo "Starting VLMEvalKit evaluation..."
-          echo ""
+          # Setup VLMEvalKit
+          VLMEVALKIT_DIR="/tmp/VLMEvalKit"
+          if [ ! -d "${VLMEVALKIT_DIR}" ]; then
+            git clone https://github.com/open-compass/VLMEvalKit.git "${VLMEVALKIT_DIR}"
+          fi
+          pip install --index-url https://pypi.org/simple num2words openai-clip || true
+          pip install -e "${VLMEVALKIT_DIR}" || exit 1
 
-          EVAL_CMD="bash /workspace/scripts/evaluation/run_vlm_benchmarks.sh \
-            --framework vlmevalkit \
+          # Register model
+          python /workspace/scripts/evaluation/register_vlmevalkit_model.py \
             --model-path ${MODEL_PATH} \
             --model-name ${MODEL_NAME} \
-            --output-dir ${OUTPUT_DIR} \
-            --num-gpus ${NUM_GPUS} \
-            --benchmarks ${BENCHMARKS} \
-            --batch-size ${BATCH_SIZE}"
-          if [ -n "${BASE_MODEL_PATH:-}" ]; then
-            EVAL_CMD="${EVAL_CMD} --base-model-path ${BASE_MODEL_PATH}"
+            --vlmevalkit-dir ${VLMEVALKIT_DIR}
+
+          # Patch use_custom_prompt=True in config
+          sed -i 's/use_custom_prompt=False/use_custom_prompt=True/g' ${VLMEVALKIT_DIR}/vlmeval/config.py
+          echo "Patched use_custom_prompt=True"
+
+          # Create .env for API access
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > "${VLMEVALKIT_DIR}/.env"
+            echo "OPENAI_API_BASE=${OPENAI_API_BASE}" >> "${VLMEVALKIT_DIR}/.env"
           fi
-          eval "${EVAL_CMD}"
+
+          # Run VLMEvalKit directly with raw dataset names
+          echo "Starting VLMEvalKit evaluation..."
+          torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py \
+            --data MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI GQA_TestDev_Balanced ScienceQA_TEST ChartQA_TEST HallusionBench LLaVA_Bench MMHal \
+            --model ${MODEL_NAME} \
+            --work-dir ${OUTPUT_DIR} \
+            --verbose \
+            --reuse \
+            --judge gpt-4o-mini
 
           echo ""
           echo "========================================="
@@ -101,7 +118,7 @@ spec:
               key: key
               optional: true
         - name: OPENAI_API_BASE
-          value: "https://openrouter.ai/api/v1"
+          value: "https://openrouter.ai/api/v1/chat/completions"
 
         # Cache directories
         - name: HF_HOME
@@ -129,13 +146,13 @@ spec:
          # value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
-          value: "Qwen2.5-VL-7B-Base"
+          value: "Qwen2.5-VL-7B-Base-v2"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/vlmevalkit"
+          value: "/outputs/benchmark_results/vlmevalkit_v2"
         - name: NUM_GPUS
           value: "1"
         - name: BENCHMARKS
-          value: "mmmu,mmvet,ai2d,ocrbench,mathvista,gqa,scienceqa,chartqa,hallusionbench"
+          value: "llava_bench,mmhal"
         - name: BATCH_SIZE
           value: "1"
 
@@ -148,11 +165,11 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "1"
-            memory: "16Gi"
+            memory: "14Gi"
             cpu: "2"
           limits:
             nvidia.com/rtxa6000: "1"
-            memory: "16Gi"
+            memory: "14Gi"
             cpu: "2"
 
         volumeMounts:

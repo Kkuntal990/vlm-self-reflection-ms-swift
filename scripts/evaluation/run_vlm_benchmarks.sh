@@ -47,7 +47,7 @@ VLMEVALKIT_DIR="/tmp/VLMEvalKit"
 # ========================================
 
 # VLMEvalKit benchmark names
-VLMEVALKIT_ALL="MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI GQA_TestDev_Balanced ScienceQA_TEST ChartQA_TEST HallusionBench"
+VLMEVALKIT_ALL="MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI GQA_TestDev_Balanced ScienceQA_TEST ChartQA_TEST HallusionBench LLaVA_Bench MMHal"
 
 # lmms-eval benchmark names
 LMMS_EVAL_ALL="mmbench_en_dev,mme,seedbench,mmmu_val,mmvet,ai2d,ocrbench,mathvista_testmini,gqa,scienceqa_img,chartqa,hallusionbench"
@@ -66,6 +66,8 @@ declare -A VLMEVALKIT_MAP=(
     ["scienceqa"]="ScienceQA_TEST"
     ["chartqa"]="ChartQA_TEST"
     ["hallusionbench"]="HallusionBench"
+    ["llava_bench"]="LLaVA_Bench"
+    ["mmhal"]="MMHal"
 )
 
 declare -A LMMS_EVAL_MAP=(
@@ -324,6 +326,9 @@ run_vlmevalkit() {
         --vlmevalkit-dir ${VLMEVALKIT_DIR}"
     if [ -n "${BASE_MODEL_PATH}" ]; then
         register_cmd="${register_cmd} --base-model-path ${BASE_MODEL_PATH}"
+    fi
+    if [ -n "${SYSTEM_PROMPT:-}" ]; then
+        register_cmd="${register_cmd} --system-prompt \"${SYSTEM_PROMPT}\""
     fi
     eval "${register_cmd}"
 

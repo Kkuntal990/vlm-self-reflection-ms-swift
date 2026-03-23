@@ -106,6 +106,12 @@ def parse_args() -> argparse.Namespace:
         default=12845056,
         help="Maximum pixel count for Qwen2VL image processing (default: 16384*28*28)",
     )
+    parser.add_argument(
+        "--system-prompt",
+        type=str,
+        default="",
+        help="System prompt to inject during evaluation (empty = no system prompt)",
+    )
     return parser.parse_args()
 
 
@@ -115,6 +121,7 @@ def register_qwen_model(
     model_name: str,
     min_pixels: int,
     max_pixels: int,
+    system_prompt: str = "",
 ) -> None:
     """Register a Qwen2VL model by inserting into existing config section.
 
@@ -124,6 +131,7 @@ def register_qwen_model(
         model_name: Name to register the model under.
         min_pixels: Minimum pixel count for image processing.
         max_pixels: Maximum pixel count for image processing.
+        system_prompt: System prompt for evaluation (empty = no system prompt).
     """
     config_content = config_path.read_text()
 
@@ -131,13 +139,19 @@ def register_qwen_model(
         logger.info(f"Model '{model_name}' already registered in config")
         return
 
+    system_prompt_line = ""
+    if system_prompt:
+        escaped = system_prompt.replace('"', '\\"')
+        system_prompt_line = f'        system_prompt="{escaped}",\n'
+
     entry = (
         f'\n    "{model_name}": partial(\n'
         f"        Qwen2VLChat,\n"
         f'        model_path="{model_path}",\n'
         f"        min_pixels={min_pixels},\n"
         f"        max_pixels={max_pixels},\n"
-        f"        use_custom_prompt=False,\n"
+        f"        use_custom_prompt=True,\n"
+        f"{system_prompt_line}"
         f"    ),\n"
     )
 
@@ -279,7 +293,7 @@ def main() -> None:
     if model_class == "qwen2vl":
         register_qwen_model(
             config_path, args.model_path, args.model_name,
-            args.min_pixels, args.max_pixels,
+            args.min_pixels, args.max_pixels, args.system_prompt,
         )
     elif model_class == "llava":
         register_llava_model(
