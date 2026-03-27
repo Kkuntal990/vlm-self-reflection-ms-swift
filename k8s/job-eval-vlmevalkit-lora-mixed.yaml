@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-thought-openended
+  name: eval-vlmevalkit-lora-mixed-v1
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -68,6 +68,33 @@ spec:
           pip install --index-url https://pypi.org/simple num2words openai-clip || true
           pip install -e "${VLMEVALKIT_DIR}" || exit 1
 
+          # Merge LoRA adapter if detected
+          if [ -f "${MODEL_PATH}/adapter_config.json" ]; then
+            echo "LoRA adapter detected. Merging into base model..."
+            MERGED_PATH="/tmp/merged_model"
+            python3 -c "
+          from peft import PeftModel
+          from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+          import torch
+          base_path = '${BASE_MODEL_PATH}'
+          adapter_path = '${MODEL_PATH}'
+          merged_path = '${MERGED_PATH}'
+          print(f'Loading base model: {base_path}')
+          model = Qwen2_5_VLForConditionalGeneration.from_pretrained(base_path, torch_dtype=torch.bfloat16, device_map='cpu')
+          print(f'Loading LoRA adapter: {adapter_path}')
+          model = PeftModel.from_pretrained(model, adapter_path)
+          print('Merging...')
+          model = model.merge_and_unload()
+          print(f'Saving merged model to: {merged_path}')
+          model.save_pretrained(merged_path)
+          processor = AutoProcessor.from_pretrained(base_path)
+          processor.save_pretrained(merged_path)
+          print('Merge complete')
+          "
+            MODEL_PATH="${MERGED_PATH}"
+            echo "Using merged model at: ${MODEL_PATH}"
+          fi
+
           # Fix missing model_type in config.json
           python3 -c "
           import json, os
@@ -82,35 +109,55 @@ spec:
                   print(f'Added model_type=qwen2_5_vl to {cfg_path}')
           "
 
-          # Register model
-          python /workspace/scripts/evaluation/register_vlmevalkit_model.py \
-            --model-path ${MODEL_PATH} \
-            --model-name ${MODEL_NAME} \
-            --vlmevalkit-dir ${VLMEVALKIT_DIR}
-
-          # Patch: keep use_custom_prompt=False, just add system_prompt
+          # Register model with system_prompt directly into config.py
+          # Find the closing '}' of qwen2vl_series dict and insert before it
           python3 << 'PYEOF'
           import os
-          config_path = os.environ.get('VLMEVALKIT_DIR', '/tmp/VLMEvalKit') + '/vlmeval/config.py'
+          vlmevalkit_dir = os.environ.get('VLMEVALKIT_DIR', '/tmp/VLMEvalKit')
+          config_path = f'{vlmevalkit_dir}/vlmeval/config.py'
           model_name = os.environ.get('MODEL_NAME', '')
+          model_path = os.environ.get('MODEL_PATH', '')
           system_prompt = os.environ.get('SYSTEM_PROMPT', '')
+
           with open(config_path) as f:
               content = f.read()
-          idx = content.find(model_name)
-          if idx != -1:
-              pos = content.find('use_custom_prompt=False,', idx)
-              end = content.find('),', idx)
-              if pos != -1 and (end == -1 or pos < end):
-                  old = 'use_custom_prompt=False,'
-                  new = f'use_custom_prompt=False,\n        system_prompt="{system_prompt}",'
-                  content = content[:pos] + new + content[pos+len(old):]
-                  with open(config_path, 'w') as f:
-                      f.write(content)
-                  print(f'Patched {model_name}: use_custom_prompt=False + system_prompt')
-              else:
-                  print('WARNING: use_custom_prompt=False not found in model entry')
+
+          if model_name in content:
+              print(f'Model {model_name} already registered')
           else:
-              print(f'WARNING: model {model_name} not found in config')
+              # Find qwen2vl_series dict and insert before its closing '}'
+              series_start = content.find('qwen2vl_series = {')
+              if series_start == -1:
+                  print('ERROR: qwen2vl_series not found in config.py')
+                  exit(1)
+              # Find the closing '}' of this dict by tracking brace depth
+              brace_depth = 0
+              closing_brace = -1
+              for i in range(series_start, len(content)):
+                  if content[i] == '{':
+                      brace_depth += 1
+                  elif content[i] == '}':
+                      brace_depth -= 1
+                      if brace_depth == 0:
+                          closing_brace = i
+                          break
+              if closing_brace == -1:
+                  print('ERROR: could not find closing brace of qwen2vl_series')
+                  exit(1)
+              entry = (
+                  f'    "{model_name}": partial(\n'
+                  f'        vlm.Qwen2VLChat,\n'
+                  f'        model_path="{model_path}",\n'
+                  f'        min_pixels=1280 * 28 * 28,\n'
+                  f'        max_pixels=16384 * 28 * 28,\n'
+                  f'        use_custom_prompt=False,\n'
+                  f'        system_prompt="{system_prompt}",\n'
+                  f'    ),\n'
+              )
+              content = content[:closing_brace] + entry + content[closing_brace:]
+              with open(config_path, 'w') as f:
+                  f.write(content)
+              print(f'Registered {model_name} in qwen2vl_series')
           PYEOF
 
           # Create .env for API access
@@ -170,9 +217,9 @@ spec:
           #value: "llava-hf/llava-1.5-7b-hf"
           #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
           #value: "/outputs/grpo_self_reflection_v1/final"
-          value: "/outputs/qwen-7b-fire-sft-thought-same-prompts/v1-20260327-082038/checkpoint-1644"
+          value: "/outputs/qwen-7b-lora-mixed-v1/v0-20260323-084417/checkpoint-1018"
         - name: BASE_MODEL_PATH
-          value: ""
+          value: "Qwen/Qwen2.5-VL-7B-Instruct"
         # - name: MODEL_PATH
         #   #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
         #   #value: "/outputs/grpo_self_reflection_v1/final"
@@ -181,13 +228,13 @@ spec:
          # value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
-          value: "QWEN-2-5Vl-thought-MT-mixed-same-prompt"
+          value: "QWEN-2-5Vl-lora-mixed-v1"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/vlmevalkit_mixed_same_prompt"
+          value: "/outputs/benchmark_results/vlmevalkit_v3"
         - name: NUM_GPUS
           value: "1"
         - name: BENCHMARKS
-          value: "all"
+          value: "llava_bench,mmhal"
         - name: BATCH_SIZE
           value: "1"
 
@@ -204,11 +251,11 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "1"
-            memory: "14Gi"
+            memory: "32Gi"
             cpu: "2"
           limits:
             nvidia.com/rtxa6000: "1"
-            memory: "14Gi"
+            memory: "32Gi"
             cpu: "2"
 
         volumeMounts:

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-thought-openended
+  name: eval-vlmevalkit-thought-v2-openended
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -170,7 +170,7 @@ spec:
           #value: "llava-hf/llava-1.5-7b-hf"
           #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
           #value: "/outputs/grpo_self_reflection_v1/final"
-          value: "/outputs/qwen-7b-fire-sft-thought-same-prompts/v1-20260327-082038/checkpoint-1644"
+          value: "/outputs/qwen-7b-fire-sft-thought-v2/v0-20260322-210118/checkpoint-2035"
         - name: BASE_MODEL_PATH
           value: ""
         # - name: MODEL_PATH
@@ -181,13 +181,13 @@ spec:
          # value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
         - name: MODEL_NAME
           #value: "FireSFT-LLaVA-7B"
-          value: "QWEN-2-5Vl-thought-MT-mixed-same-prompt"
+          value: "QWEN-2-5Vl-thought-v2-ckpt2035"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/vlmevalkit_mixed_same_prompt"
+          value: "/outputs/benchmark_results/vlmevalkit_v3"
         - name: NUM_GPUS
           value: "1"
         - name: BENCHMARKS
-          value: "all"
+          value: "llava_bench,mmhal"
         - name: BATCH_SIZE
           value: "1"
 

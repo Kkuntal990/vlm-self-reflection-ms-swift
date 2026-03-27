@@ -105,7 +105,7 @@ spec:
         # - name: DATASET_PATH
         #   value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
         - name: DATASET_PATH
-          value: "/outputs/mixed_training_v1/fire_messages_filtered.jsonl /outputs/mixed_training_v1/fire_messages_single_turn.jsonl /outputs/fire_preprocessed_v3/fire_feedback_train_v2_with_thought.jsonl /outputs/mixed_training_v1/lvlm_nlf_multiturn.jsonl /outputs/mixed_training_v1/lvlm_nlf_single_turn.jsonl /outputs/mixed_training_v1/lvlm_nlf_feedback.jsonl /outputs/mixed_training_v1/vqa_aokvqa.jsonl /outputs/mixed_training_v1/vqa_scienceqa.jsonl /outputs/mixed_training_v1/vqa_tallyqa.jsonl"
+          value: "/outputs/mixed_training_v1/fire_messages_filtered.jsonl /outputs/mixed_training_v1/fire_messages_single_turn.jsonl /outputs/fire_preprocessed_v3/fire_feedback_train_v2_with_thought.jsonl#50000 /outputs/mixed_training_v1/lvlm_nlf_multiturn.jsonl /outputs/mixed_training_v1/lvlm_nlf_single_turn.jsonl /outputs/mixed_training_v1/lvlm_nlf_feedback.jsonl /outputs/mixed_training_v1/vqa_aokvqa.jsonl /outputs/mixed_training_v1/vqa_scienceqa.jsonl /outputs/mixed_training_v1/vqa_tallyqa.jsonl"
 
         #Qwen MAX_LEN: 3124
         - name: MAX_LEN
@@ -122,7 +122,7 @@ spec:
         - name: EPOCHS
           value: "1"           # Number of training epochs
         - name: LR
-          value: "1e-6"        # Learning rate (lower for full fine-tuning)
+          value: "5e-6"        # Learning rate (lower for full fine-tuning)
         - name: WARMUP_RATIO
           value: "0.03"        # Warmup ratio
         - name: WEIGHT_DECAY
@@ -147,7 +147,7 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "qwen-7b-fire-sft-thought-v2"
+          value: "qwen-7b-fire-sft-thought-same-prompts"
         - name: RESUME_PATH
           # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
           value: ""

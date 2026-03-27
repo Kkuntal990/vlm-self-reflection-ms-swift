@@ -177,6 +177,7 @@ def register_llava_model(
     model_path: str,
     model_name: str,
     base_model_path: str = "",
+    system_prompt: str = "",
 ) -> None:
     """Register a LLaVA model using the custom HF wrapper.
 
@@ -188,6 +189,7 @@ def register_llava_model(
         model_path: Path to the model checkpoint or LoRA adapter.
         model_name: Name to register the model under.
         base_model_path: Base model path for LoRA adapters.
+        system_prompt: System prompt for evaluation (empty = no system prompt).
     """
     # Always copy the wrapper module (may have been updated since last registration)
     wrapper_src = Path(__file__).parent / "llava_hf_wrapper.py"
@@ -206,10 +208,13 @@ def register_llava_model(
         return
 
     # Append import + registration to the end of config.py
+    partial_parts = [f"model_path='{model_path}'"]
     if base_model_path:
-        partial_args = f"model_path='{model_path}', base_model_path='{base_model_path}'"
-    else:
-        partial_args = f"model_path='{model_path}'"
+        partial_parts.append(f"base_model_path='{base_model_path}'")
+    if system_prompt:
+        escaped = system_prompt.replace("'", "\\'")
+        partial_parts.append(f"system_prompt='{escaped}'")
+    partial_args = ", ".join(partial_parts)
     append_block = (
         f"\n# Custom LLaVA-HF model registration\n"
         f"from vlmeval.vlm.llava_hf_wrapper import LLaVA_HF\n"
@@ -298,7 +303,7 @@ def main() -> None:
     elif model_class == "llava":
         register_llava_model(
             config_path, args.vlmevalkit_dir, args.model_path, args.model_name,
-            args.base_model_path,
+            args.base_model_path, args.system_prompt,
         )
     elif model_class == "llava_next":
         register_llava_next_model(

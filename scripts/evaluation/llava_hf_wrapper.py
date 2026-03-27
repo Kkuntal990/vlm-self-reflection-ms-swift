@@ -23,17 +23,19 @@ class LLaVA_HF(BaseModel):
     INSTALL_REQ = False
     INTERLEAVE = False
 
-    def __init__(self, model_path: str, base_model_path: str = "", **kwargs) -> None:
+    def __init__(self, model_path: str, base_model_path: str = "", system_prompt: str = "", **kwargs) -> None:
         """Initialize the LLaVA-HF model.
 
         Args:
             model_path: Path to HuggingFace-format LLaVA checkpoint or LoRA adapter.
             base_model_path: Base model path for LoRA adapters (empty = full model).
+            system_prompt: System prompt to prepend to conversations (empty = none).
             **kwargs: Additional arguments passed to BaseModel.
         """
         from transformers import AutoProcessor, LlavaForConditionalGeneration
 
         self.model_path = model_path
+        self.system_prompt = system_prompt
 
         # For LoRA adapters, load processor from base model
         processor_path = base_model_path if base_model_path else model_path
@@ -111,15 +113,19 @@ class LLaVA_HF(BaseModel):
         prompt = "\n".join(prompt_parts)
 
         # Format as conversation for LLaVA-1.5
-        conversation = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image"} for _ in images
-                ]
-                + [{"type": "text", "text": prompt.replace("<image>", "").strip()}],
-            }
-        ]
+        conversation = []
+        if self.system_prompt:
+            conversation.append({
+                "role": "system",
+                "content": [{"type": "text", "text": self.system_prompt}],
+            })
+        conversation.append({
+            "role": "user",
+            "content": [
+                {"type": "image"} for _ in images
+            ]
+            + [{"type": "text", "text": prompt.replace("<image>", "").strip()}],
+        })
 
         text_prompt = self.processor.apply_chat_template(
             conversation, add_generation_prompt=True

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: llava-7b-fire-full-sft-multi-turn
+  name: llava-7b-fire-full-sft-mixed-dataset
 spec:
   backoffLimit: 3
   template:
@@ -58,13 +58,13 @@ spec:
 
         resources:
           requests:
-            nvidia.com/a100: "2"
-            memory: "96Gi"
-            cpu: "4"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
+            cpu: "8"
           limits:
-            nvidia.com/a100: "2"
-            memory: "96Gi"
-            cpu: "4"
+            nvidia.com/a100: "4"
+            memory: "128Gi"
+            cpu: "8"
 
         volumeMounts:
         - name: cache-volume
@@ -105,7 +105,7 @@ spec:
         # - name: DATASET_PATH
         #   value: "/outputs/fire_preprocessed_v2/fire_sharegpt_train.jsonl"
         - name: DATASET_PATH
-          value: "/outputs/fire_preprocessed_v3/fire_feedback_train_v2.jsonl /outputs/fire_preprocessed_v3/fire_messages_train_last_loss_only.jsonl"
+          value: "/outputs/mixed_training_v1/fire_messages_filtered.jsonl /outputs/mixed_training_v1/fire_messages_single_turn.jsonl /outputs/fire_preprocessed_v3/fire_feedback_train_v2_with_thought.jsonl /outputs/mixed_training_v1/lvlm_nlf_multiturn.jsonl /outputs/mixed_training_v1/lvlm_nlf_single_turn.jsonl /outputs/mixed_training_v1/lvlm_nlf_feedback.jsonl /outputs/mixed_training_v1/vqa_aokvqa.jsonl /outputs/mixed_training_v1/vqa_scienceqa.jsonl /outputs/mixed_training_v1/vqa_tallyqa.jsonl"
 
         #Qwen MAX_LEN: 3124
         - name: MAX_LEN
@@ -122,7 +122,7 @@ spec:
         - name: EPOCHS
           value: "1"           # Number of training epochs
         - name: LR
-          value: "3e-6"        # Learning rate (lower for full fine-tuning)
+          value: "2e-6"        # Learning rate (lower for full fine-tuning)
         - name: WARMUP_RATIO
           value: "0.03"        # Warmup ratio
         - name: WEIGHT_DECAY
@@ -147,7 +147,7 @@ spec:
 
         # Output configuration
         - name: RUN_NAME
-          value: "llava-7b-fire-full-sft-multi-turn"
+          value: "llava-7b-fire-full-sft-mixed-dataset-v1"
         - name: RESUME_PATH
           # value: "/outputs/llava-ov-feedback-training-data2/v10-20260201-010820/checkpoint-1000"
           # value: "/outputs/llava-multi-turn-training/v0-20260207-154959/checkpoint-700"
@@ -156,7 +156,7 @@ spec:
         - name: LOGGING_STEPS
           value: "10"
         - name: EVAL_STEPS
-          value: "1000"
+          value: "1000000"
         - name: SAVE_STEPS
           value: "700"
         - name: SAVE_TOTAL_LIMIT
@@ -180,9 +180,9 @@ spec:
           operator: Exists
           effect: NoSchedule
         #Tolerate nautilus.io/issue taints (nodes with known issues but still usable)
-        # - key: nautilus.io/issue
-        #   operator: Exists
-        #   effect: NoSchedule
+        - key: nautilus.io/issue
+          operator: Exists
+          effect: NoSchedule
 
       affinity:
         nodeAffinity:

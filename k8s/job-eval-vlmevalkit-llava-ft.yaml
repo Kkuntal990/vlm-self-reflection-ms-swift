@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-thought-openended
+  name: eval-vlmevalkit-llava-ft
   labels:
     app: ms-swift
     task: benchmark-evaluation
     framework: vlmevalkit
-    model: qwen-7b-rl
+    model: llava-1-5-7b-ft
 spec:
   backoffLimit: 2
   template:
@@ -31,11 +31,12 @@ spec:
 
           echo "========================================="
           echo "VLMEvalKit Benchmark Evaluation"
+          echo "Fine-tuned LLaVA-1.5-7B"
           echo "========================================="
           echo ""
           echo "Model Path:       ${MODEL_PATH}"
-          echo "Base Model Path:  ${BASE_MODEL_PATH:-none (full model)}"
           echo "Model Name:       ${MODEL_NAME}"
+          echo "System Prompt:    ${SYSTEM_PROMPT}"
           echo "Output Dir:  ${OUTPUT_DIR}"
           echo "Num GPUs:    ${NUM_GPUS}"
           echo "Benchmarks:  ${BENCHMARKS}"
@@ -68,50 +69,66 @@ spec:
           pip install --index-url https://pypi.org/simple num2words openai-clip || true
           pip install -e "${VLMEVALKIT_DIR}" || exit 1
 
-          # Fix missing model_type in config.json
-          python3 -c "
-          import json, os
-          cfg_path = '${MODEL_PATH}/config.json'
-          if os.path.exists(cfg_path):
-              with open(cfg_path) as f:
-                  cfg = json.load(f)
-              if 'model_type' not in cfg:
-                  cfg['model_type'] = 'qwen2_5_vl'
-                  with open(cfg_path, 'w') as f:
-                      json.dump(cfg, f, indent=2)
-                  print(f'Added model_type=qwen2_5_vl to {cfg_path}')
-          "
+          # Patch llava_hf_wrapper.py to support system_prompt before registration copies it
+          python3 << 'PATCH_WRAPPER'
+          import re
+          wrapper_path = "/workspace/scripts/evaluation/llava_hf_wrapper.py"
+          with open(wrapper_path) as f:
+              code = f.read()
 
-          # Register model
+          # Add system_prompt parameter to __init__
+          if "system_prompt" not in code:
+              code = code.replace(
+                  'def __init__(self, model_path: str, base_model_path: str = "", **kwargs) -> None:',
+                  'def __init__(self, model_path: str, base_model_path: str = "", system_prompt: str = "", **kwargs) -> None:'
+              )
+              code = code.replace(
+                  'self.model_path = model_path',
+                  'self.model_path = model_path\n        self.system_prompt = system_prompt'
+              )
+              # Add system message to conversation in generate_inner
+              code = code.replace(
+                  '# Format as conversation for LLaVA-1.5\n        conversation = [\n            {\n                "role": "user",',
+                  '# Format as conversation for LLaVA-1.5\n        conversation = []\n        if self.system_prompt:\n            conversation.append({"role": "system", "content": [{"type": "text", "text": self.system_prompt}]})\n        conversation.append({\n                "role": "user",'
+              )
+              code = code.replace(
+                  '+ [{"type": "text", "text": prompt.replace("<image>", "").strip()}],\n            }\n        ]',
+                  '+ [{"type": "text", "text": prompt.replace("<image>", "").strip()}],\n        })'
+              )
+              with open(wrapper_path, 'w') as f:
+                  f.write(code)
+              print("Patched llava_hf_wrapper.py with system_prompt support")
+          else:
+              print("llava_hf_wrapper.py already has system_prompt support")
+          PATCH_WRAPPER
+
+          # Register model (without system_prompt flag — old script doesn't support it for llava)
           python /workspace/scripts/evaluation/register_vlmevalkit_model.py \
-            --model-path ${MODEL_PATH} \
-            --model-name ${MODEL_NAME} \
-            --vlmevalkit-dir ${VLMEVALKIT_DIR}
+            --model-path "${MODEL_PATH}" \
+            --model-name "${MODEL_NAME}" \
+            --model-class llava \
+            --vlmevalkit-dir "${VLMEVALKIT_DIR}"
 
-          # Patch: keep use_custom_prompt=False, just add system_prompt
-          python3 << 'PYEOF'
+          # Patch the registered config entry to add system_prompt (using repr() to safely escape quotes)
+          python3 << 'PATCH_CONFIG'
           import os
           config_path = os.environ.get('VLMEVALKIT_DIR', '/tmp/VLMEvalKit') + '/vlmeval/config.py'
           model_name = os.environ.get('MODEL_NAME', '')
           system_prompt = os.environ.get('SYSTEM_PROMPT', '')
-          with open(config_path) as f:
-              content = f.read()
-          idx = content.find(model_name)
-          if idx != -1:
-              pos = content.find('use_custom_prompt=False,', idx)
-              end = content.find('),', idx)
-              if pos != -1 and (end == -1 or pos < end):
-                  old = 'use_custom_prompt=False,'
-                  new = f'use_custom_prompt=False,\n        system_prompt="{system_prompt}",'
-                  content = content[:pos] + new + content[pos+len(old):]
+          model_path = os.environ.get('MODEL_PATH', '')
+          if system_prompt:
+              with open(config_path) as f:
+                  content = f.read()
+              old_entry = f"model_path='{model_path}')"
+              if old_entry in content:
+                  new_entry = f"model_path='{model_path}', system_prompt={repr(system_prompt)})"
+                  content = content.replace(old_entry, new_entry)
                   with open(config_path, 'w') as f:
                       f.write(content)
-                  print(f'Patched {model_name}: use_custom_prompt=False + system_prompt')
+                  print(f"Patched config.py: added system_prompt for {model_name}")
               else:
-                  print('WARNING: use_custom_prompt=False not found in model entry')
-          else:
-              print(f'WARNING: model {model_name} not found in config')
-          PYEOF
+                  print(f"WARNING: could not find model entry in config.py")
+          PATCH_CONFIG
 
           # Create .env for API access
           if [ -n "${OPENAI_API_KEY:-}" ]; then
@@ -119,7 +136,7 @@ spec:
             echo "OPENAI_API_BASE=${OPENAI_API_BASE}" >> "${VLMEVALKIT_DIR}/.env"
           fi
 
-          # Run VLMEvalKit directly with raw dataset names
+          # Run VLMEvalKit evaluation
           echo "Starting VLMEvalKit evaluation..."
           torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py \
             --data MMBench_DEV_EN MME SEEDBench_IMG MMMU_DEV_VAL MMVet AI2D_TEST OCRBench MathVista_MINI GQA_TestDev_Balanced ScienceQA_TEST ChartQA_TEST HallusionBench LLaVA_Bench MMHal \
@@ -167,31 +184,19 @@ spec:
 
         # Evaluation configuration
         - name: MODEL_PATH
-          #value: "llava-hf/llava-1.5-7b-hf"
-          #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
-          #value: "/outputs/grpo_self_reflection_v1/final"
-          value: "/outputs/qwen-7b-fire-sft-thought-same-prompts/v1-20260327-082038/checkpoint-1644"
-        - name: BASE_MODEL_PATH
-          value: ""
-        # - name: MODEL_PATH
-        #   #value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"
-        #   #value: "/outputs/grpo_self_reflection_v1/final"
-        #   value: ""
-        # - name: BASE_MODEL_PATH
-         # value: "/outputs/llava-7b-fire-full-sft-multi-and-single-turn/v1-20260208-031459/checkpoint-1856"  # Set to base model HF ID/path for LoRA adapter checkpoints
+          value: "/outputs/llava-7b-fire-full-sft-mixed-dataset-v1/v1-20260326-161426/checkpoint-2035"
         - name: MODEL_NAME
-          #value: "FireSFT-LLaVA-7B"
-          value: "QWEN-2-5Vl-thought-MT-mixed-same-prompt"
+          value: "LLaVA-1.5-7B-FireSFT-Mixed"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/vlmevalkit_mixed_same_prompt"
+          value: "/outputs/benchmark_results/vlmevalkit_llava_ft"
         - name: NUM_GPUS
           value: "1"
         - name: BENCHMARKS
-          value: "all"
+          value: "llava_bench,mmhal"
         - name: BATCH_SIZE
           value: "1"
 
-        # System prompt for FT model
+        # System prompt for fine-tuned model
         - name: SYSTEM_PROMPT
           value: 'You are a helpful vision-language assistant. You should produce accurate, detailed, and grounded answers based on the image and the user''s instructions. When given feedback, critique, or scores, revise your response to improve correctness, specificity, and completeness.'
 
@@ -204,11 +209,11 @@ spec:
         resources:
           requests:
             nvidia.com/rtxa6000: "1"
-            memory: "14Gi"
+            memory: "32Gi"
             cpu: "2"
           limits:
             nvidia.com/rtxa6000: "1"
-            memory: "14Gi"
+            memory: "32Gi"
             cpu: "2"
 
         volumeMounts:
@@ -230,7 +235,6 @@ spec:
         - key: nautilus.io/reservation
           operator: Exists
           effect: NoSchedule
-
 
       volumes:
       - name: cache-volume
