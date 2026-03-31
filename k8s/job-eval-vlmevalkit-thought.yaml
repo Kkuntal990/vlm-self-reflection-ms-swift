@@ -88,6 +88,17 @@ spec:
             --model-name ${MODEL_NAME} \
             --vlmevalkit-dir ${VLMEVALKIT_DIR}
 
+          # Fix: latest VLMEvalKit uses vlm.Qwen2VLChat (module-qualified), not bare Qwen2VLChat
+          # Only replace bare Qwen2VLChat (not already prefixed with vlm.)
+          python3 -c "
+          import re
+          p = '${VLMEVALKIT_DIR}/vlmeval/config.py'
+          with open(p) as f: c = f.read()
+          c = re.sub(r'(?<!vlm\.)Qwen2VLChat', 'vlm.Qwen2VLChat', c)
+          with open(p, 'w') as f: f.write(c)
+          print('Patched bare Qwen2VLChat -> vlm.Qwen2VLChat')
+          "
+
           # Patch: keep use_custom_prompt=False, just add system_prompt
           python3 << 'PYEOF'
           import os

@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
         "--model-class",
         type=str,
         default="",
-        choices=["", "qwen2vl", "llava", "llava_next"],
+        choices=["", "qwen2vl", "qwen2vl_reflective", "llava", "llava_next"],
         help="Model class for VLMEvalKit (default: auto-detect from model path)",
     )
     parser.add_argument(
@@ -111,6 +111,18 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="",
         help="System prompt to inject during evaluation (empty = no system prompt)",
+    )
+    parser.add_argument(
+        "--num-turns",
+        type=int,
+        default=1,
+        help="Number of self-reflection turns for qwen2vl_reflective (default: 1)",
+    )
+    parser.add_argument(
+        "--feedback-temperature",
+        type=float,
+        default=0.7,
+        help="Temperature for feedback generation in reflective mode (default: 0.7)",
     )
     return parser.parse_args()
 
@@ -144,9 +156,12 @@ def register_qwen_model(
         escaped = system_prompt.replace('"', '\\"')
         system_prompt_line = f'        system_prompt="{escaped}",\n'
 
+    # Detect whether config uses module-qualified names (vlm.Qwen2VLChat) or bare names
+    cls_name = "vlm.Qwen2VLChat" if "vlm.Qwen2VLChat" in config_content else "Qwen2VLChat"
+
     entry = (
         f'\n    "{model_name}": partial(\n'
-        f"        Qwen2VLChat,\n"
+        f"        {cls_name},\n"
         f'        model_path="{model_path}",\n'
         f"        min_pixels={min_pixels},\n"
         f"        max_pixels={max_pixels},\n"
@@ -156,7 +171,7 @@ def register_qwen_model(
     )
 
     # Find the Qwen2-VL section and insert after an existing entry
-    for marker in ["Qwen2.5-VL-7B-Instruct", "Qwen2VLChat"]:
+    for marker in ["Qwen2.5-VL-7B-Instruct", "vlm.Qwen2VLChat", "Qwen2VLChat"]:
         if marker in config_content:
             marker_pos = config_content.index(marker)
             insert_pos = config_content.find("),\n", marker_pos)
@@ -224,6 +239,72 @@ def register_llava_model(
     config_content += append_block
     config_path.write_text(config_content)
     logger.info(f"Registered LLaVA_HF model '{model_name}'")
+
+
+def register_qwen_reflective_model(
+    config_path: Path,
+    vlmevalkit_dir: str,
+    model_path: str,
+    model_name: str,
+    min_pixels: int,
+    max_pixels: int,
+    system_prompt: str = "",
+    num_turns: int = 1,
+    feedback_temperature: float = 0.7,
+) -> None:
+    """Register a Qwen2VL self-reflective model.
+
+    Copies the reflective wrapper to VLMEvalKit and registers it in config.
+
+    Args:
+        config_path: Path to VLMEvalKit config.py.
+        vlmevalkit_dir: Path to VLMEvalKit installation directory.
+        model_path: Path to the model checkpoint.
+        model_name: Name to register the model under.
+        min_pixels: Minimum pixel count for image processing.
+        max_pixels: Maximum pixel count for image processing.
+        system_prompt: VL assistant system prompt override.
+        num_turns: Number of feedback-refinement cycles.
+        feedback_temperature: Temperature for feedback generation.
+    """
+    # Copy the reflective wrapper module
+    wrapper_src = Path(__file__).parent / "qwen2vl_self_reflective.py"
+    wrapper_dst = Path(vlmevalkit_dir) / "vlmeval" / "vlm" / "qwen2vl_self_reflective.py"
+    if wrapper_src.exists():
+        wrapper_dst.write_text(wrapper_src.read_text())
+        logger.info(f"Copied self-reflective wrapper to {wrapper_dst}")
+    else:
+        logger.error(f"Self-reflective wrapper not found at {wrapper_src}")
+        sys.exit(1)
+
+    config_content = config_path.read_text()
+
+    if model_name in config_content:
+        logger.info(f"Model '{model_name}' already registered in config")
+        return
+
+    # Build partial args
+    partial_parts = [f"model_path='{model_path}'"]
+    partial_parts.append(f"min_pixels={min_pixels}")
+    partial_parts.append(f"max_pixels={max_pixels}")
+    partial_parts.append(f"num_turns={num_turns}")
+    partial_parts.append(f"feedback_temperature={feedback_temperature}")
+    partial_parts.append("use_custom_prompt=True")
+    if system_prompt:
+        escaped = system_prompt.replace("'", "\\'")
+        partial_parts.append(f"vl_system_prompt='{escaped}'")
+    partial_args = ", ".join(partial_parts)
+
+    append_block = (
+        f"\n# Self-reflective Qwen2VL model registration\n"
+        f"from vlmeval.vlm.qwen2vl_self_reflective import Qwen2VLSelfReflectiveChat\n"
+        f"supported_VLM['{model_name}'] = partial("
+        f"Qwen2VLSelfReflectiveChat, {partial_args})\n"
+    )
+
+    config_content += append_block
+    config_path.write_text(config_content)
+    logger.info(f"Registered self-reflective model '{model_name}' (num_turns={num_turns})")
 
 
 def register_llava_next_model(
@@ -297,17 +378,39 @@ def main() -> None:
 
     if model_class == "qwen2vl":
         register_qwen_model(
-            config_path, args.model_path, args.model_name,
-            args.min_pixels, args.max_pixels, args.system_prompt,
+            config_path,
+            args.model_path,
+            args.model_name,
+            args.min_pixels,
+            args.max_pixels,
+            args.system_prompt,
+        )
+    elif model_class == "qwen2vl_reflective":
+        register_qwen_reflective_model(
+            config_path,
+            args.vlmevalkit_dir,
+            args.model_path,
+            args.model_name,
+            args.min_pixels,
+            args.max_pixels,
+            args.system_prompt,
+            args.num_turns,
+            args.feedback_temperature,
         )
     elif model_class == "llava":
         register_llava_model(
-            config_path, args.vlmevalkit_dir, args.model_path, args.model_name,
-            args.base_model_path, args.system_prompt,
+            config_path,
+            args.vlmevalkit_dir,
+            args.model_path,
+            args.model_name,
+            args.base_model_path,
+            args.system_prompt,
         )
     elif model_class == "llava_next":
         register_llava_next_model(
-            config_path, args.model_path, args.model_name,
+            config_path,
+            args.model_path,
+            args.model_name,
         )
 
 
