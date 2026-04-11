@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: eval-vlmevalkit-base-mathverse
+  name: eval-vlmevalkit-base-hallu
   labels:
     app: ms-swift
     task: benchmark-evaluation
@@ -97,7 +97,7 @@ spec:
           "
 
           torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py \
-            --data MathVerse_MINI \
+            --data POPE AMBER \
             --model ${MODEL_NAME} \
             --work-dir ${OUTPUT_DIR} \
             --verbose \
@@ -158,7 +158,7 @@ spec:
           #value: "FireSFT-LLaVA-7B"
           value: "Qwen2.5-VL-7B-Base-v2"
         - name: OUTPUT_DIR
-          value: "/outputs/benchmark_results/vlmevalkit_base_mathverse"
+          value: "/outputs/benchmark_results/vlmevalkit_base_hallu"
         - name: NUM_GPUS
           value: "1"
         - name: BENCHMARKS

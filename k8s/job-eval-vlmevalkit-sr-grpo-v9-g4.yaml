@@ -1,0 +1,430 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eval-vlmevalkit-sr-grpo-v9-g4
+  labels:
+    app: ms-swift
+    task: benchmark-evaluation
+    framework: vlmevalkit
+    mode: self-reflective
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: benchmark-evaluation
+        framework: vlmevalkit
+        mode: self-reflective
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: evaluator
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "VLMEvalKit Self-Reflective Evaluation"
+          echo "========================================="
+          echo ""
+          echo "Model Path:       ${MODEL_PATH}"
+          echo "Model Name:       ${MODEL_NAME}"
+          echo "Output Dir:       ${OUTPUT_DIR}"
+          echo "Num Turns:        ${NUM_TURNS}"
+          echo "Feedback Temp:    ${FEEDBACK_TEMPERATURE}"
+          echo "Benchmarks:       ${BENCHMARKS}"
+          echo ""
+
+          # Verify GPU availability
+          echo "GPU Status:"
+          nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+          echo ""
+
+          # Verify model path
+          if [ -d "${MODEL_PATH}" ]; then
+            echo "Local model checkpoint found:"
+            ls -lh "${MODEL_PATH}/" | head -5
+          else
+            echo "MODEL_PATH is not a local directory: ${MODEL_PATH}"
+            echo "Treating as HuggingFace model ID..."
+          fi
+          echo ""
+
+          # Create output directory
+          mkdir -p "${OUTPUT_DIR}"
+
+          # Setup VLMEvalKit
+          VLMEVALKIT_DIR="/tmp/VLMEvalKit"
+          if [ ! -d "${VLMEVALKIT_DIR}" ]; then
+            git clone https://github.com/open-compass/VLMEvalKit.git "${VLMEVALKIT_DIR}"
+          fi
+          pip install --index-url https://pypi.org/simple num2words openai-clip || true
+          pip install -e "${VLMEVALKIT_DIR}" || exit 1
+
+          # Merge LoRA adapter if adapter_config.json exists
+          MERGED_PATH="/tmp/merged_model"
+          if [ -f "${MODEL_PATH}/adapter_config.json" ]; then
+            echo "LoRA adapter detected, merging into base model..."
+            python3 -c "
+          import json, torch
+          with open('${MODEL_PATH}/adapter_config.json') as f:
+              cfg = json.load(f)
+          base = cfg['base_model_name_or_path']
+          print(f'Base model: {base}')
+          from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+          from peft import PeftModel
+          print('Loading base model...')
+          model = Qwen2_5_VLForConditionalGeneration.from_pretrained(base, torch_dtype=torch.bfloat16, device_map='cpu')
+          print('Loading LoRA adapter...')
+          model = PeftModel.from_pretrained(model, '${MODEL_PATH}')
+          print('Merging...')
+          model = model.merge_and_unload()
+          print('Saving merged model to ${MERGED_PATH}...')
+          model.save_pretrained('${MERGED_PATH}')
+          processor = AutoProcessor.from_pretrained(base)
+          processor.save_pretrained('${MERGED_PATH}')
+          print('Merge complete!')
+          "
+            export MODEL_PATH="${MERGED_PATH}"
+            echo "Using merged model at: ${MODEL_PATH}"
+          else
+            echo "Full model checkpoint (no LoRA adapter)"
+          fi
+
+          # Fix missing model_type in config.json
+          python3 -c "
+          import json, os
+          cfg_path = '${MODEL_PATH}/config.json'
+          if os.path.exists(cfg_path):
+              with open(cfg_path) as f:
+                  cfg = json.load(f)
+              if 'model_type' not in cfg:
+                  cfg['model_type'] = 'qwen2_5_vl'
+                  with open(cfg_path, 'w') as f:
+                      json.dump(cfg, f, indent=2)
+                  print(f'Added model_type=qwen2_5_vl to {cfg_path}')
+          "
+
+          # Write self-reflective wrapper directly into VLMEvalKit (not in Docker image yet)
+          python3 << 'WRAPPER_EOF'
+          import os
+          wrapper_code = '''
+          from __future__ import annotations
+          import json
+          import logging
+          import os
+
+          logger = logging.getLogger(__name__)
+
+          _DEFAULT_VL_ASSISTANT_PROMPT = (
+              "You are a helpful vision-language assistant. You should produce accurate, "
+              "detailed, and grounded answers based on the image and the user's "
+              "instructions. "
+              "When given feedback, critique, or scores, revise your response to improve "
+              "correctness, specificity, and completeness."
+          )
+
+          _DEFAULT_FEEDBACK_CRITIC_PROMPT = (
+              "You are a visual question answering critic. Given an image, a question, "
+              "and the conversation history of the user's answers and prior feedback, "
+              "provide constructive feedback on the user's latest answer identifying "
+              "what is correct, what is incorrect, and how to improve. Ground your "
+              "feedback in what is visible in the image."
+          )
+
+          def Qwen2VLSelfReflectiveChat(*args, **kwargs):
+              return _Qwen2VLSelfReflectiveChat(*args, **kwargs)
+
+          class _Qwen2VLSelfReflectiveChat:
+              def __init__(self, model_path, num_turns=1, feedback_max_tokens=512,
+                           vl_system_prompt=None, critic_system_prompt=None,
+                           feedback_temperature=0.7, conversation_log_path=None, **kwargs):
+                  from vlmeval.vlm.qwen2_vl.model import Qwen2VLChat
+                  self.num_turns = num_turns
+                  self.feedback_max_tokens = feedback_max_tokens
+                  self.feedback_temperature = feedback_temperature
+                  self.vl_system_prompt = vl_system_prompt or os.environ.get(
+                      "VL_ASSISTANT_SYSTEM_PROMPT", _DEFAULT_VL_ASSISTANT_PROMPT)
+                  self.critic_system_prompt = critic_system_prompt or os.environ.get(
+                      "FEEDBACK_CRITIC_SYSTEM_PROMPT", _DEFAULT_FEEDBACK_CRITIC_PROMPT)
+                  self.conversation_log_path = conversation_log_path or os.environ.get(
+                      "CONVERSATION_LOG_PATH", None)
+                  self._sample_counter = 0
+                  kwargs.setdefault("system_prompt", self.vl_system_prompt)
+                  self._base = Qwen2VLChat(model_path=model_path, **kwargs)
+                  self.model_path = self._base.model_path
+                  self.INTERLEAVE = self._base.INTERLEAVE
+                  self.VIDEO_LLM = self._base.VIDEO_LLM
+                  self.INSTALL_REQ = self._base.INSTALL_REQ
+                  logger.info(f"Self-reflective wrapper: num_turns={num_turns}, log={self.conversation_log_path}")
+
+              def __getattr__(self, name):
+                  return getattr(self._base, name)
+
+              def generate_inner(self, message, dataset=None):
+                  initial_answer = self._base.generate_inner(message, dataset=dataset)
+                  if self.num_turns <= 0:
+                      return initial_answer
+                  image_items, question_text = self._extract_content(message, dataset)
+
+                  conversation = {
+                      "sample_id": self._sample_counter,
+                      "dataset": dataset,
+                      "question": question_text,
+                      "initial_answer": initial_answer,
+                      "turns": [],
+                  }
+                  self._sample_counter += 1
+                  current_answer = initial_answer
+
+                  for turn_idx in range(self.num_turns):
+                      feedback = self._generate_feedback(image_items, question_text, current_answer, turn_idx, dataset)
+                      logger.info(f"Turn {turn_idx+1} feedback: {feedback[:120]}")
+                      refined = self._generate_refinement(image_items, question_text, current_answer, feedback, dataset)
+                      logger.info(f"Turn {turn_idx+1} refined: {refined[:120]}")
+                      conversation["turns"].append({
+                          "turn": turn_idx + 1,
+                          "answer_before": current_answer,
+                          "feedback": feedback,
+                          "answer_after": refined,
+                      })
+                      current_answer = refined
+
+                  conversation["final_answer"] = current_answer
+                  self._log_conversation(conversation)
+                  return current_answer
+
+              def _log_conversation(self, conversation):
+                  if not self.conversation_log_path:
+                      return
+                  try:
+                      os.makedirs(os.path.dirname(self.conversation_log_path), exist_ok=True)
+                      with open(self.conversation_log_path, "a") as f:
+                          f.write(json.dumps(conversation, ensure_ascii=False) + "\\n")
+                  except Exception as e:
+                      logger.warning(f"Failed to write conversation log: {e}")
+
+              def _extract_content(self, message, dataset=None):
+                  image_items, text_parts = [], []
+                  for item in message:
+                      if item["type"] == "image":
+                          image_items.extend(self._base._prepare_content([item], dataset=dataset))
+                      elif item["type"] == "text":
+                          text_parts.append(item["value"])
+                  return image_items, "\\n".join(text_parts)
+
+              def _generate_multi_turn(self, messages, max_new_tokens=None):
+                  from qwen_vl_utils import process_vision_info
+                  text = self._base.processor.apply_chat_template(
+                      [messages], tokenize=False, add_generation_prompt=True)
+                  images, videos = process_vision_info([messages])
+                  inputs = self._base.processor(
+                      text=text, images=images, videos=videos, padding=True, return_tensors="pt")
+                  inputs = inputs.to("cuda")
+                  gen_kwargs = dict(self._base.generate_kwargs)
+                  if max_new_tokens is not None:
+                      gen_kwargs["max_new_tokens"] = max_new_tokens
+                  generated_ids = self._base.model.generate(**inputs, **gen_kwargs)
+                  generated_ids = [o[len(i):] for i, o in zip(inputs.input_ids, generated_ids)]
+                  return self._base.processor.tokenizer.batch_decode(
+                      generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+
+              def _generate_feedback(self, image_items, question_text, current_answer, turn_idx, dataset):
+                  messages = [
+                      {"role": "system", "content": self.critic_system_prompt},
+                      {"role": "assistant", "content": image_items + [{"type": "text", "text": question_text}]},
+                      {"role": "user", "content": current_answer},
+                  ]
+                  orig_temp = self._base.generate_kwargs.get("temperature", 0.01)
+                  self._base.generate_kwargs["temperature"] = self.feedback_temperature
+                  try:
+                      return self._generate_multi_turn(messages, max_new_tokens=self.feedback_max_tokens)
+                  finally:
+                      self._base.generate_kwargs["temperature"] = orig_temp
+
+              def _generate_refinement(self, image_items, question_text, current_answer, feedback, dataset):
+                  messages = [
+                      {"role": "system", "content": self.vl_system_prompt},
+                      {"role": "user", "content": image_items + [{"type": "text", "text": question_text}]},
+                      {"role": "assistant", "content": current_answer},
+                      {"role": "user", "content": feedback},
+                  ]
+                  return self._generate_multi_turn(messages)
+
+              def generate(self, message, dataset=None):
+                  return self._base.generate.__func__(self, message, dataset)
+
+              def use_custom_prompt(self, dataset):
+                  return self._base.use_custom_prompt(dataset)
+
+              def build_prompt(self, line, dataset=None):
+                  return self._base.build_prompt(line, dataset=dataset)
+
+              def dump_image(self, line, dataset=None):
+                  return self._base.dump_image(line, dataset=dataset)
+          '''
+          import textwrap
+          vlmevalkit_dir = os.environ.get('VLMEVALKIT_DIR', '/tmp/VLMEvalKit')
+          wrapper_path = f'{vlmevalkit_dir}/vlmeval/vlm/qwen2vl_self_reflective.py'
+          with open(wrapper_path, 'w') as f:
+              f.write(textwrap.dedent(wrapper_code))
+          print(f'Wrote self-reflective wrapper to {wrapper_path}')
+
+          # Register in config
+          model_path = os.environ['MODEL_PATH']
+          model_name = os.environ['MODEL_NAME']
+          num_turns = int(os.environ.get('NUM_TURNS', '1'))
+          feedback_temp = float(os.environ.get('FEEDBACK_TEMPERATURE', '0.7'))
+          config_path = f'{vlmevalkit_dir}/vlmeval/config.py'
+          with open(config_path) as f:
+              content = f.read()
+          if model_name not in content:
+              content += (
+                  f"\n# Self-reflective Qwen2VL model\n"
+                  f"from vlmeval.vlm.qwen2vl_self_reflective import Qwen2VLSelfReflectiveChat\n"
+                  f"supported_VLM['{model_name}'] = partial(\n"
+                  f"    Qwen2VLSelfReflectiveChat,\n"
+                  f"    model_path='{model_path}',\n"
+                  f"    min_pixels=1003520,\n"
+                  f"    max_pixels=12845056,\n"
+                  f"    num_turns={num_turns},\n"
+                  f"    feedback_temperature={feedback_temp},\n"
+                  f"    use_custom_prompt=True,\n"
+                  f")\n"
+              )
+              with open(config_path, 'w') as f:
+                  f.write(content)
+              print(f"Registered '{model_name}' (num_turns={num_turns})")
+          else:
+              print(f"'{model_name}' already registered")
+          WRAPPER_EOF
+
+          # Create .env for API access
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY=${OPENAI_API_KEY}" > "${VLMEVALKIT_DIR}/.env"
+            echo "OPENAI_API_BASE=${OPENAI_API_BASE}" >> "${VLMEVALKIT_DIR}/.env"
+          fi
+
+          # Run VLMEvalKit
+          echo "Starting VLMEvalKit self-reflective evaluation..."
+          echo "Each sample will do ${NUM_TURNS} feedback-refinement cycle(s)."
+          echo ""
+          torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py \
+            --data ${BENCHMARKS} \
+            --model ${MODEL_NAME} \
+            --work-dir ${OUTPUT_DIR} \
+            --verbose \
+            --judge gpt-4o-mini
+
+          echo ""
+          echo "========================================="
+          echo "Self-Reflective Evaluation Complete"
+          echo "========================================="
+          echo "Results saved to: ${OUTPUT_DIR}"
+          ls -lhR "${OUTPUT_DIR}/"
+
+        env:
+        # HuggingFace token
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # OpenAI-compatible API (for GPT-based answer extraction)
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openai-api-key
+              key: key
+              optional: true
+        - name: OPENAI_API_BASE
+          value: "https://openrouter.ai/api/v1/chat/completions"
+
+        # Cache directories
+        - name: HF_HOME
+          value: "/cache/hf"
+        - name: TRANSFORMERS_CACHE
+          value: "/cache/hf/transformers"
+        - name: HF_DATASETS_CACHE
+          value: "/cache/hf/datasets"
+        - name: TORCH_HOME
+          value: "/cache/torch"
+
+        # Evaluation configuration
+        - name: MODEL_PATH
+          value: "/outputs/grpo_qwen_sr_v9_20k/checkpoint-2250"
+        - name: MODEL_NAME
+          value: "QWEN-2-5Vl-grpo-v9-sr-g4"
+        - name: OUTPUT_DIR
+          value: "/outputs/benchmark_results/vlmevalkit_sr_grpo_v9/g4"
+        - name: NUM_GPUS
+          value: "1"
+        - name: BENCHMARKS
+          value: "ChartQA_TEST MME ScienceQA_TEST"
+        - name: BATCH_SIZE
+          value: "1"
+
+        # Self-reflection parameters
+        - name: NUM_TURNS
+          value: "1"
+        - name: FEEDBACK_TEMPERATURE
+          value: "0.7"
+        - name: CONVERSATION_LOG_PATH
+          value: "/outputs/benchmark_results/vlmevalkit_sr_grpo_v9/g4/conversation_log.jsonl"
+
+        # Python and CUDA settings
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+        resources:
+          requests:
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "3"
+          limits:
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "3"
+
+        volumeMounts:
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: cache-volume
+          mountPath: /cache
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      tolerations:
+        - effect: NoSchedule
+          key: nautilus.io/hardware
+          operator: Equal
+          value: large-gpu
+        - effect: PreferNoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+
+      volumes:
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 200Gi
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi
