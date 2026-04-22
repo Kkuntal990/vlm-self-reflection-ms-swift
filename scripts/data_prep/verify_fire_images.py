@@ -351,7 +351,9 @@ def verify_paths(
                     stats["by_path_prefix"][path_prefix]["missing"] += 1
 
                     # Store sample of missing paths
-                    prefix_missing = [p for p in stats["missing_paths_sample"] if p.startswith(path_prefix)]
+                    prefix_missing = [
+                        p for p in stats["missing_paths_sample"] if p.startswith(path_prefix)
+                    ]
                     if len(prefix_missing) < 5:
                         stats["missing_paths_sample"].append(image_path)
 

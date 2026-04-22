@@ -22,6 +22,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -113,7 +114,9 @@ def categorize_sample(question: str, answer: str) -> str:
     ans_stripped = answer.strip()
 
     # 1. Bounding box: answer contains coordinate pattern [0.xx, 0.yy, ...]
-    if re.search(r"\[\s*\d+\.?\d*\s*,\s*\d+\.?\d*\s*,\s*\d+\.?\d*\s*,\s*\d+\.?\d*\s*\]", ans_stripped):
+    if re.search(
+        r"\[\s*\d+\.?\d*\s*,\s*\d+\.?\d*\s*,\s*\d+\.?\d*\s*,\s*\d+\.?\d*\s*\]", ans_stripped
+    ):
         return "bounding_box"
 
     # 2. Region description: question references a bounding box region to describe
@@ -179,10 +182,7 @@ def main() -> None:
             category = categorize_sample(question, answer)
             category_counter[category] += 1
 
-            f_out.write(
-                json.dumps({"index": i, "category": category}, ensure_ascii=False)
-                + "\n"
-            )
+            f_out.write(json.dumps({"index": i, "category": category}, ensure_ascii=False) + "\n")
 
     total = sum(category_counter.values())
 

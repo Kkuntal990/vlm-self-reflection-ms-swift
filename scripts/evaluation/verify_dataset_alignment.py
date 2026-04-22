@@ -24,6 +24,7 @@ import shutil
 import sys
 from pathlib import Path
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -33,9 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Verify dataset image-answer alignment"
-    )
+    parser = argparse.ArgumentParser(description="Verify dataset image-answer alignment")
     parser.add_argument(
         "--dataset_path",
         type=str,
@@ -106,7 +105,12 @@ def extract_all_turns(messages: list) -> list:
             if current_turn:
                 turns.append(current_turn)
             current_turn = {"answer": content, "feedback": ""}
-        elif role == "user" and current_turn and not content.startswith("What") and "<image>" not in content:
+        elif (
+            role == "user"
+            and current_turn
+            and not content.startswith("What")
+            and "<image>" not in content
+        ):
             # This is feedback, not the initial question
             current_turn["feedback"] = content
 
@@ -119,7 +123,7 @@ def extract_all_turns(messages: list) -> list:
 def load_dataset(dataset_path: str) -> list:
     """Load dataset from JSONL file."""
     samples = []
-    with open(dataset_path, "r") as f:
+    with open(dataset_path) as f:
         for i, line in enumerate(f):
             try:
                 sample = json.loads(line.strip())
@@ -171,7 +175,9 @@ def main():
 
     # Sample selection
     if args.sequential:
-        selected_indices = list(range(args.start_index, min(args.start_index + args.num_samples, len(samples))))
+        selected_indices = list(
+            range(args.start_index, min(args.start_index + args.num_samples, len(samples)))
+        )
     else:
         random.seed(args.random_seed)
         selected_indices = random.sample(range(len(samples)), min(args.num_samples, len(samples)))
@@ -220,17 +226,19 @@ def main():
                 logger.warning(f"Image not found: {image_path}")
 
         # Store verification data
-        verification_data.append({
-            "sample_num": i,
-            "dataset_index": idx,
-            "image_file": output_image_name if image_exists else None,
-            "original_image_path": image_path,
-            "image_exists": image_exists,
-            "question": question,
-            "final_answer": final_answer,
-            "num_turns": len(all_turns),
-            "all_turns": all_turns,
-        })
+        verification_data.append(
+            {
+                "sample_num": i,
+                "dataset_index": idx,
+                "image_file": output_image_name if image_exists else None,
+                "original_image_path": image_path,
+                "image_exists": image_exists,
+                "question": question,
+                "final_answer": final_answer,
+                "num_turns": len(all_turns),
+                "all_turns": all_turns,
+            }
+        )
 
         if (i + 1) % 100 == 0:
             logger.info(f"Processed {i + 1}/{len(selected_indices)} samples")
@@ -269,7 +277,8 @@ def main():
     # Create HTML report for easier viewing
     html_path = output_dir / "verification_report.html"
     with open(html_path, "w") as f:
-        f.write("""<!DOCTYPE html>
+        f.write(
+            """<!DOCTYPE html>
 <html>
 <head>
     <title>Dataset Alignment Verification</title>
@@ -287,35 +296,48 @@ def main():
 </head>
 <body>
     <h1>Dataset Alignment Verification Report</h1>
-    <p><strong>Dataset:</strong> """ + args.dataset_path + """</p>
-    <p><strong>Total verified:</strong> """ + str(len(verification_data)) + """</p>
-    <p><strong>Images copied:</strong> """ + str(images_copied) + """</p>
-    <p><strong>Images missing:</strong> """ + str(images_missing) + """</p>
+    <p><strong>Dataset:</strong> """
+            + args.dataset_path
+            + """</p>
+    <p><strong>Total verified:</strong> """
+            + str(len(verification_data))
+            + """</p>
+    <p><strong>Images copied:</strong> """
+            + str(images_copied)
+            + """</p>
+    <p><strong>Images missing:</strong> """
+            + str(images_missing)
+            + """</p>
     <hr>
-""")
+"""
+        )
 
         for item in verification_data:
             f.write(f"""
     <div class="sample">
-        <h2>Sample #{item['sample_num']} (Index: {item['dataset_index']})</h2>
-        <div class="meta">Original: {item['original_image_path']}</div>
+        <h2>Sample #{item["sample_num"]} (Index: {item["dataset_index"]})</h2>
+        <div class="meta">Original: {item["original_image_path"]}</div>
 """)
-            if item['image_exists']:
+            if item["image_exists"]:
                 f.write(f'        <img src="{item["image_file"]}" alt="Sample image">\n')
             else:
                 f.write('        <p class="missing">IMAGE MISSING</p>\n')
 
             f.write(f"""
-        <p class="question">Q: {item['question']}</p>
-        <p class="answer">Final Answer: {item['final_answer']}</p>
-        <p>Turns: {item['num_turns']}</p>
+        <p class="question">Q: {item["question"]}</p>
+        <p class="answer">Final Answer: {item["final_answer"]}</p>
+        <p>Turns: {item["num_turns"]}</p>
 """)
 
             # Show all turns
-            for t_idx, turn in enumerate(item.get('all_turns', [])):
-                f.write(f'        <p><strong>Turn {t_idx + 1} Answer:</strong> {turn.get("answer", "")[:200]}...</p>\n')
-                if turn.get('feedback'):
-                    f.write(f'        <p class="feedback">Feedback: {turn.get("feedback", "")[:200]}...</p>\n')
+            for t_idx, turn in enumerate(item.get("all_turns", [])):
+                f.write(
+                    f"        <p><strong>Turn {t_idx + 1} Answer:</strong> {turn.get('answer', '')[:200]}...</p>\n"
+                )
+                if turn.get("feedback"):
+                    f.write(
+                        f'        <p class="feedback">Feedback: {turn.get("feedback", "")[:200]}...</p>\n'
+                    )
 
             f.write("    </div>\n")
 

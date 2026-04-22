@@ -283,26 +283,32 @@ class VLMInference:
             if i == 0:
                 # First turn includes image
                 clean_question = human_content.replace("<image>", "").strip()
-                messages.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": image_path},
-                        {"type": "text", "text": clean_question},
-                    ],
-                })
-                conversation_history.append({
-                    "role": "user",
-                    "content": clean_question,
-                    "has_image": True,
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": image_path},
+                            {"type": "text", "text": clean_question},
+                        ],
+                    }
+                )
+                conversation_history.append(
+                    {
+                        "role": "user",
+                        "content": clean_question,
+                        "has_image": True,
+                    }
+                )
             else:
                 # Subsequent turns are text-only (feedback)
                 messages.append({"role": "user", "content": human_content})
-                conversation_history.append({
-                    "role": "user",
-                    "content": human_content,
-                    "has_image": False,
-                })
+                conversation_history.append(
+                    {
+                        "role": "user",
+                        "content": human_content,
+                        "has_image": False,
+                    }
+                )
 
             # Add assistant response ONLY if this is NOT the last turn
             # For the last turn, we want to GENERATE the response, not feed GT
@@ -316,10 +322,12 @@ class VLMInference:
                 assistant_response = turn.get("assistant", "")
                 if assistant_response:
                     messages.append({"role": "assistant", "content": assistant_response})
-                    conversation_history.append({
-                        "role": "assistant",
-                        "content": assistant_response,
-                    })
+                    conversation_history.append(
+                        {
+                            "role": "assistant",
+                            "content": assistant_response,
+                        }
+                    )
                     context_turns += 1
 
         # Generate the response for the last turn
@@ -327,11 +335,13 @@ class VLMInference:
         response = self.generate(messages, config)
 
         # Add generated response to history
-        conversation_history.append({
-            "role": "assistant",
-            "content": response,
-            "is_generated": True,
-        })
+        conversation_history.append(
+            {
+                "role": "assistant",
+                "content": response,
+                "is_generated": True,
+            }
+        )
 
         return {
             "sample_id": sample_id,
@@ -410,21 +420,25 @@ class VLMInference:
         for turn_idx in range(max_turns):
             if turn_idx == 0:
                 # First turn: generate initial response
-                messages = [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "image": image_path},
-                        {"type": "text", "text": clean_question},
-                    ],
-                }]
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": image_path},
+                            {"type": "text", "text": clean_question},
+                        ],
+                    }
+                ]
 
                 response = self.generate(messages, config)
 
-                generated_conversation.append({
-                    "human": original_question,
-                    "assistant": response,
-                    "is_generated": True,
-                })
+                generated_conversation.append(
+                    {
+                        "human": original_question,
+                        "assistant": response,
+                        "is_generated": True,
+                    }
+                )
 
                 # Update history for next turn
                 messages_history = [
@@ -451,12 +465,14 @@ class VLMInference:
                 messages_history.append({"role": "user", "content": feedback})
                 response = self.generate(messages_history, config)
 
-                generated_conversation.append({
-                    "human": feedback,
-                    "assistant": response,
-                    "is_generated": True,
-                    "feedback_source": "ground_truth" if use_gt_feedback else "generated",
-                })
+                generated_conversation.append(
+                    {
+                        "human": feedback,
+                        "assistant": response,
+                        "is_generated": True,
+                        "feedback_source": "ground_truth" if use_gt_feedback else "generated",
+                    }
+                )
 
                 # Update history
                 messages_history.append({"role": "assistant", "content": response})
@@ -464,11 +480,13 @@ class VLMInference:
         # Keep ground truth for comparison
         gt_conversation = []
         for turn in conversation[:max_turns]:
-            gt_conversation.append({
-                "human": turn.get("human", ""),
-                "assistant": turn.get("assistant", ""),
-                "is_generated": False,
-            })
+            gt_conversation.append(
+                {
+                    "human": turn.get("human", ""),
+                    "assistant": turn.get("assistant", ""),
+                    "is_generated": False,
+                }
+            )
 
         return {
             "sample_id": sample_id,
@@ -746,6 +764,7 @@ def main():
         except Exception as e:
             logger.error(f"Failed to process sample {sample.get('sample_index', '?')}: {e}")
             import traceback
+
             traceback.print_exc()
             failed += 1
             skipped_reasons["error"] += 1

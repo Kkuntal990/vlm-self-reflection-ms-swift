@@ -41,6 +41,7 @@ Usage:
 
 import argparse
 import base64
+import contextlib
 import io
 import json
 import logging
@@ -49,7 +50,8 @@ import random
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
@@ -57,6 +59,7 @@ os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 from datasets import load_dataset
 from PIL import Image
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,7 +75,7 @@ _MCQ_LETTER_PATTERN = re.compile(r"\b([A-F])\b")
 _YESNO_PATTERN = re.compile(r"\b(yes|no|true|false)\b", re.IGNORECASE)
 
 # Maps any accepted token → canonical "Yes" or "No"
-_YESNO_CANONICAL: Dict[str, str] = {
+_YESNO_CANONICAL: dict[str, str] = {
     "yes": "Yes",
     "true": "Yes",
     "no": "No",
@@ -190,7 +193,7 @@ def _save_image(image: Image.Image, image_dir: Path, dataset_name: str, idx: int
     return rel_path
 
 
-def _open_image(raw: Any) -> Optional[Image.Image]:
+def _open_image(raw: Any) -> Image.Image | None:
     """Open a PIL image from various raw formats returned by HF datasets.
 
     Args:
@@ -211,7 +214,7 @@ def _open_image(raw: Any) -> Optional[Image.Image]:
     return None
 
 
-def _format_mcq_choices(letters: List[str], texts: List[str]) -> str:
+def _format_mcq_choices(letters: list[str], texts: list[str]) -> str:
     """Format option letters and texts into '(A) text (B) text ...' string.
 
     Args:
@@ -221,7 +224,7 @@ def _format_mcq_choices(letters: List[str], texts: List[str]) -> str:
     Returns:
         Formatted choices string
     """
-    return " ".join(f"({l}) {t}" for l, t in zip(letters, texts))
+    return " ".join(f"({letter}) {text}" for letter, text in zip(letters, texts))
 
 
 # =============================================================================
@@ -230,10 +233,10 @@ def _format_mcq_choices(letters: List[str], texts: List[str]) -> str:
 
 
 def _parse_pixel_reasoner_sample(
-    sample: Dict[str, Any],
+    sample: dict[str, Any],
     image_dir: Path,
     idx: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Parse one PixelReasoner-SFT-Data row.
 
     The message_list has a user turn (image + question + options) and an
@@ -254,7 +257,7 @@ def _parse_pixel_reasoner_sample(
     question_text = ""
     choices_text = ""
     ground_truth = ""
-    image: Optional[Image.Image] = None
+    image: Image.Image | None = None
 
     for msg in message_list:
         role = msg.get("role", "")
@@ -269,8 +272,8 @@ def _parse_pixel_reasoner_sample(
                 elif item.get("type") == "text":
                     text = item.get("text", "")
                     lines = text.strip().split("\n")
-                    choice_lines = [l for l in lines if re.match(r"^[A-F]:", l.strip())]
-                    question_lines = [l for l in lines if not re.match(r"^[A-F]:", l.strip())]
+                    choice_lines = [ln for ln in lines if re.match(r"^[A-F]:", ln.strip())]
+                    question_lines = [ln for ln in lines if not re.match(r"^[A-F]:", ln.strip())]
                     question_text = " ".join(question_lines).strip()
 
                     letters, texts = [], []
@@ -303,7 +306,7 @@ def _parse_pixel_reasoner_sample(
     }
 
 
-def load_pixel_reasoner(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
+def load_pixel_reasoner(image_dir: Path, max_samples: int) -> list[dict[str, Any]]:
     """Load PixelReasoner-SFT-Data (MCQ, train split).
 
     Args:
@@ -318,7 +321,7 @@ def load_pixel_reasoner(image_dir: Path, max_samples: int) -> List[Dict[str, Any
     total = min(max_samples, len(dataset)) if max_samples > 0 else len(dataset)
     logger.info(f"Processing {total} / {len(dataset)} samples ...")
 
-    samples: List[Dict[str, Any]] = []
+    samples: list[dict[str, Any]] = []
     stats = {"processed": 0, "skipped": 0}
 
     for idx in tqdm(range(total), desc="PixelReasoner"):
@@ -339,10 +342,10 @@ def load_pixel_reasoner(image_dir: Path, max_samples: int) -> List[Dict[str, Any
 
 
 def _parse_mme_cot_sample(
-    sample: Dict[str, Any],
+    sample: dict[str, Any],
     image_dir: Path,
     idx: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Parse one MME-CoT row.
 
     Columns A–L contain option texts; `answer` contains the ground truth letter.
@@ -385,7 +388,7 @@ def _parse_mme_cot_sample(
     }
 
 
-def load_mme_cot(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
+def load_mme_cot(image_dir: Path, max_samples: int) -> list[dict[str, Any]]:
     """Load MME-CoT (MCQ, test split — used entirely as validation set).
 
     Args:
@@ -400,7 +403,7 @@ def load_mme_cot(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
     total = min(max_samples, len(dataset)) if max_samples > 0 else len(dataset)
     logger.info(f"Processing {total} / {len(dataset)} samples ...")
 
-    samples: List[Dict[str, Any]] = []
+    samples: list[dict[str, Any]] = []
     stats = {"processed": 0, "skipped": 0}
 
     for idx in tqdm(range(total), desc="MME-CoT"):
@@ -420,7 +423,7 @@ def load_mme_cot(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
 # =============================================================================
 
 
-def _extract_yesno_from_chosen(chosen: str) -> Optional[str]:
+def _extract_yesno_from_chosen(chosen: str) -> str | None:
     """Extract canonical Yes/No ground truth from an RLAIF-V chosen response.
 
     Accepts "Yes", "No", "True", "False" (case-insensitive) as the first word
@@ -441,10 +444,10 @@ def _extract_yesno_from_chosen(chosen: str) -> Optional[str]:
 
 
 def _parse_rlaif_v_sample(
-    sample: Dict[str, Any],
+    sample: dict[str, Any],
     image_dir: Path,
     idx: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Parse one RLAIF-V row, keeping only yes/no questions.
 
     Args:
@@ -479,7 +482,7 @@ def _parse_rlaif_v_sample(
     }
 
 
-def load_rlaif_v(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
+def load_rlaif_v(image_dir: Path, max_samples: int) -> list[dict[str, Any]]:
     """Load RLAIF-V (yes/no subset of the train split).
 
     Args:
@@ -493,7 +496,7 @@ def load_rlaif_v(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
     dataset = load_dataset("openbmb/RLAIF-V-Dataset", split="train")
     logger.info(f"Total RLAIF-V rows: {len(dataset)} — scanning for yes/no ...")
 
-    samples: List[Dict[str, Any]] = []
+    samples: list[dict[str, Any]] = []
     stats = {"processed": 0, "not_yesno": 0, "parse_fail": 0}
 
     for idx in tqdm(range(len(dataset)), desc="RLAIF-V"):
@@ -530,7 +533,7 @@ _VISCO_CHOICES_BLOCK = re.compile(r"Choices?\s*:?\s*\n?(.*)", re.DOTALL | re.IGN
 _VISCO_OPTION = re.compile(r"\(([A-F])\)\s*(.*?)(?=\s*\([A-F]\)|$)", re.DOTALL)
 
 
-def _parse_visco_choices(question: str) -> tuple[str, List[str], List[str]]:
+def _parse_visco_choices(question: str) -> tuple[str, list[str], list[str]]:
     """Split a VISCO question into clean question text + MCQ letters + texts.
 
     VISCO embeds choices at the end of the question string, e.g.:
@@ -558,7 +561,7 @@ def _parse_visco_choices(question: str) -> tuple[str, List[str], List[str]]:
     return clean_question, letters, texts
 
 
-def _label_to_letter(label: str, letters: List[str], texts: List[str]) -> Optional[str]:
+def _label_to_letter(label: str, letters: list[str], texts: list[str]) -> str | None:
     """Map a VISCO label value to its MCQ option letter.
 
     The `label` field contains the answer *text* (e.g. "(0, 0)"), not the
@@ -581,10 +584,10 @@ def _label_to_letter(label: str, letters: List[str], texts: List[str]) -> Option
 
 
 def _parse_visco_sample(
-    sample: Dict[str, Any],
+    sample: dict[str, Any],
     image_dir: Path,
     idx: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Parse one VISCO row.
 
     VISCO images are base64-encoded strings. Ground truth is a label value
@@ -638,7 +641,7 @@ def _parse_visco_sample(
     }
 
 
-def load_visco(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
+def load_visco(image_dir: Path, max_samples: int) -> list[dict[str, Any]]:
     """Load VISCO dataset (MCQ with step-level critiques).
 
     Args:
@@ -653,7 +656,7 @@ def load_visco(image_dir: Path, max_samples: int) -> List[Dict[str, Any]]:
     total = min(max_samples, len(dataset)) if max_samples > 0 else len(dataset)
     logger.info(f"Processing {total} / {len(dataset)} samples ...")
 
-    samples: List[Dict[str, Any]] = []
+    samples: list[dict[str, Any]] = []
     stats = {"processed": 0, "no_match": 0, "skipped": 0}
 
     for idx in tqdm(range(total), desc="VISCO"):
@@ -747,13 +750,13 @@ def _is_correct(answer1: str, ground_truth: str, answer_type: str) -> bool:
 
 
 def generate_answer1_batch(
-    samples: List[Dict[str, Any]],
+    samples: list[dict[str, Any]],
     model: Any,
     processor: Any,
     image_dir: Path,
     batch_size: int,
     device: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Run model inference to populate answer1 and a1_is_correct for each sample.
 
     Processes samples individually (Qwen2.5-VL does not support variable-length
@@ -772,7 +775,7 @@ def generate_answer1_batch(
     """
     import torch
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     for start in tqdm(range(0, len(samples), batch_size), desc="Inference"):
         chunk = samples[start : start + batch_size]
@@ -781,19 +784,19 @@ def generate_answer1_batch(
             img_path = image_dir / sample["image_path"]
             img = _open_image(str(img_path))
             if img is None:
-                try:
+                with contextlib.suppress(Exception):
                     img = Image.open(img_path).convert("RGB")
-                except Exception:
-                    pass
 
             # Build single-turn prompt
-            content: List[Dict[str, Any]] = []
+            content: list[dict[str, Any]] = []
             if img is not None:
                 content.append({"type": "image"})
 
             question_with_hint = sample["question"]
             if sample["answer_type"] == "mcq" and sample.get("choices"):
-                question_with_hint += f"\n\nChoices: {sample['choices']}\n\nAnswer with a single letter only."
+                question_with_hint += (
+                    f"\n\nChoices: {sample['choices']}\n\nAnswer with a single letter only."
+                )
             elif sample["answer_type"] == "yesno":
                 question_with_hint += "\n\nAnswer with Yes or No only."
             content.append({"type": "text", "text": question_with_hint})
@@ -804,7 +807,7 @@ def generate_answer1_batch(
                 text = processor.apply_chat_template(
                     messages, tokenize=False, add_generation_prompt=True
                 )
-                proc_kwargs: Dict[str, Any] = {"text": text, "return_tensors": "pt"}
+                proc_kwargs: dict[str, Any] = {"text": text, "return_tensors": "pt"}
                 if img is not None:
                     proc_kwargs["images"] = [img]
 
@@ -840,7 +843,7 @@ def generate_answer1_batch(
 # =============================================================================
 
 
-def _save_jsonl(samples: List[Dict[str, Any]], path: Path) -> None:
+def _save_jsonl(samples: list[dict[str, Any]], path: Path) -> None:
     """Write samples to a JSONL file.
 
     Args:
@@ -854,10 +857,10 @@ def _save_jsonl(samples: List[Dict[str, Any]], path: Path) -> None:
 
 
 def _split_train_val(
-    samples: List[Dict[str, Any]],
+    samples: list[dict[str, Any]],
     val_fraction: float,
     seed: int,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Randomly split samples into train and val sets.
 
     Args:
@@ -903,8 +906,8 @@ def main() -> None:
     logger.info(f"Skip inference:  {args.skip_inference}")
     logger.info("=" * 60)
 
-    train_samples: List[Dict[str, Any]] = []
-    val_samples: List[Dict[str, Any]] = []
+    train_samples: list[dict[str, Any]] = []
+    val_samples: list[dict[str, Any]] = []
 
     # --- PixelReasoner (MCQ, split into train + val) ---
     if "pixel_reasoner" in requested:
@@ -936,9 +939,7 @@ def main() -> None:
         val_samples.extend(va)
         logger.info(f"VISCO          → train {len(tr)}, val {len(va)}")
 
-    logger.info(
-        f"\nBefore inference: train={len(train_samples)}, val={len(val_samples)}"
-    )
+    logger.info(f"\nBefore inference: train={len(train_samples)}, val={len(val_samples)}")
 
     # --- Inference: generate answer1 ---
     if not args.skip_inference:
@@ -983,14 +984,14 @@ def main() -> None:
     _save_jsonl(val_samples, output_dir / "val.jsonl")
 
     # --- Summary ---
-    def _balance(samples: List[Dict[str, Any]]) -> str:
+    def _balance(samples: list[dict[str, Any]]) -> str:
         n = len(samples)
         if n == 0:
             return "empty"
         correct = sum(1 for s in samples if s.get("a1_is_correct"))
         return f"{correct}/{n} correct ({100 * correct // n}%)"
 
-    def _types(samples: List[Dict[str, Any]]) -> str:
+    def _types(samples: list[dict[str, Any]]) -> str:
         mcq = sum(1 for s in samples if s.get("answer_type") == "mcq")
         yesno = sum(1 for s in samples if s.get("answer_type") == "yesno")
         return f"mcq={mcq} yesno={yesno}"
@@ -998,7 +999,9 @@ def main() -> None:
     logger.info("\n" + "=" * 60)
     logger.info("SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"Train: {len(train_samples):6d} | {_types(train_samples)} | {_balance(train_samples)}")
+    logger.info(
+        f"Train: {len(train_samples):6d} | {_types(train_samples)} | {_balance(train_samples)}"
+    )
     logger.info(f"Val:   {len(val_samples):6d} | {_types(val_samples)} | {_balance(val_samples)}")
     logger.info("=" * 60)
 

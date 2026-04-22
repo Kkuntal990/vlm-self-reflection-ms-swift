@@ -20,11 +20,13 @@ import os
 import sys
 from pathlib import Path
 
+
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 
 from datasets import load_dataset
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -214,22 +216,28 @@ def process_sample(sample: dict, image_base_dir: Path) -> dict | None:
     # Build messages in last_loss_only format
     messages = []
 
-    messages.append({
-        "role": "system",
-        "content": VL_ASSISTANT_SYSTEM_PROMPT,
-    })
+    messages.append(
+        {
+            "role": "system",
+            "content": VL_ASSISTANT_SYSTEM_PROMPT,
+        }
+    )
 
-    messages.append({
-        "role": "user",
-        "content": question_text,
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": question_text,
+        }
+    )
 
     # First assistant response (loss=false since not last)
-    messages.append({
-        "role": "assistant",
-        "content": rounds[0]["answer"],
-        "loss": False,
-    })
+    messages.append(
+        {
+            "role": "assistant",
+            "content": rounds[0]["answer"],
+            "loss": False,
+        }
+    )
 
     # Subsequent feedback -> refined answer exchanges
     for j in range(1, len(rounds)):
@@ -237,15 +245,19 @@ def process_sample(sample: dict, image_base_dir: Path) -> dict | None:
         current_answer = rounds[j]["answer"]
 
         if prev_feedback:
-            messages.append({
-                "role": "user",
-                "content": prev_feedback,
-            })
-            messages.append({
-                "role": "assistant",
-                "content": current_answer,
-                "loss": False,
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": prev_feedback,
+                }
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": current_answer,
+                    "loss": False,
+                }
+            )
 
     # Set last assistant turn to loss=true
     for k in range(len(messages) - 1, -1, -1):
@@ -339,7 +351,7 @@ def main() -> None:
         sys.exit(1)
 
     for split in args.splits:
-        stats = process_split(
+        process_split(
             dataset_id=args.dataset_id,
             split=split,
             output_dir=output_dir,

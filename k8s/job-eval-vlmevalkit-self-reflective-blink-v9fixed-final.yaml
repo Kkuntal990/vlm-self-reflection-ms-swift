@@ -1,0 +1,511 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eval-vlmevalkit-blink-v9fixed-final
+  labels:
+    app: ms-swift
+    task: benchmark-evaluation
+    framework: vlmevalkit
+    mode: self-reflective
+    benchmark: blink
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: ms-swift
+        task: benchmark-evaluation
+        framework: vlmevalkit
+        mode: self-reflective
+        benchmark: blink
+    spec:
+      restartPolicy: Never
+
+      containers:
+      - name: evaluator
+        image: ghcr.io/kkuntal990/ms-swift-qwen:latest
+        imagePullPolicy: Always
+
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "========================================="
+          echo "BLINK Self-Reflective Evaluation"
+          echo "========================================="
+          echo ""
+          echo "Model Path:       ${MODEL_PATH}"
+          echo "Model Name:       ${MODEL_NAME}"
+          echo "Output Dir:       ${OUTPUT_DIR}"
+          echo "Num Turns:        ${NUM_TURNS}"
+          echo "BLINK Data Dir:   ${BLINK_DATA_DIR}"
+          echo ""
+
+          # Verify GPU availability
+          echo "GPU Status:"
+          nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
+          echo ""
+
+          # Verify model path
+          if [ -d "${MODEL_PATH}" ]; then
+            echo "Local model checkpoint found:"
+            ls -lh "${MODEL_PATH}/" | head -5
+          else
+            echo "MODEL_PATH is not a local directory: ${MODEL_PATH}"
+            echo "Treating as HuggingFace model ID..."
+          fi
+          echo ""
+
+          # Verify BLINK TSVs exist
+          TSV_DIR="${BLINK_DATA_DIR}/tsv"
+          if [ ! -d "${TSV_DIR}" ]; then
+            echo "ERROR: BLINK TSV directory not found: ${TSV_DIR}"
+            echo "Run prepare_blink_vlmevalkit.py first to create TSVs."
+            exit 1
+          fi
+          echo "BLINK TSV files:"
+          ls -lh "${TSV_DIR}/"
+          TSV_COUNT=$(ls "${TSV_DIR}"/BLINK_*.tsv 2>/dev/null | wc -l)
+          echo "Found ${TSV_COUNT} BLINK subtask TSV files"
+          if [ "${TSV_COUNT}" -eq 0 ]; then
+            echo "ERROR: No BLINK TSV files found"
+            exit 1
+          fi
+          echo ""
+
+          # Create output directory
+          mkdir -p "${OUTPUT_DIR}"
+
+          # Setup VLMEvalKit
+          VLMEVALKIT_DIR="/tmp/VLMEvalKit"
+          if [ ! -d "${VLMEVALKIT_DIR}" ]; then
+            git clone https://github.com/open-compass/VLMEvalKit.git "${VLMEVALKIT_DIR}"
+          fi
+          pip install --index-url https://pypi.org/simple num2words openai-clip || true
+          pip install -e "${VLMEVALKIT_DIR}" || exit 1
+
+          # Merge LoRA adapter if adapter_config.json exists
+          MERGED_PATH="/tmp/merged_model"
+          if [ -f "${MODEL_PATH}/adapter_config.json" ]; then
+            echo "LoRA adapter detected, merging into base model..."
+            python3 -c "
+          import json, torch
+          with open('${MODEL_PATH}/adapter_config.json') as f:
+              cfg = json.load(f)
+          base = cfg['base_model_name_or_path']
+          print(f'Base model: {base}')
+          from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+          from peft import PeftModel
+          print('Loading base model...')
+          model = Qwen2_5_VLForConditionalGeneration.from_pretrained(base, torch_dtype=torch.bfloat16, device_map='cpu')
+          print('Loading LoRA adapter...')
+          model = PeftModel.from_pretrained(model, '${MODEL_PATH}')
+          print('Merging...')
+          model = model.merge_and_unload()
+          print('Saving merged model to ${MERGED_PATH}...')
+          model.save_pretrained('${MERGED_PATH}')
+          processor = AutoProcessor.from_pretrained(base)
+          processor.save_pretrained('${MERGED_PATH}')
+          print('Merge complete!')
+          "
+            export MODEL_PATH="${MERGED_PATH}"
+            echo "Using merged model at: ${MODEL_PATH}"
+          else
+            echo "Full model checkpoint (no LoRA adapter)"
+          fi
+
+          # Fix missing model_type in config.json
+          python3 -c "
+          import json, os
+          cfg_path = '${MODEL_PATH}/config.json'
+          if os.path.exists(cfg_path):
+              with open(cfg_path) as f:
+                  cfg = json.load(f)
+              if 'model_type' not in cfg:
+                  cfg['model_type'] = 'qwen2_5_vl'
+                  with open(cfg_path, 'w') as f:
+                      json.dump(cfg, f, indent=2)
+                  print(f'Added model_type=qwen2_5_vl to {cfg_path}')
+          "
+
+          # Write self-reflective wrapper directly into VLMEvalKit
+          python3 << 'WRAPPER_EOF'
+          import os
+          wrapper_code = '''
+          from __future__ import annotations
+          import json
+          import logging
+          import os
+          import re
+
+          logger = logging.getLogger(__name__)
+
+          # Exact prompts from v8 training (src/vlm_grpo/prompts.py @ a02b147)
+          # v8 trained with --use_answer_tag_only and --use_binary_verification
+          _VL_ASSISTANT_SYSTEM_PROMPT_WITH_TAGS = (
+              "You are a visual question answering assistant. "
+              "Look at the image carefully and answer the question. "
+              "When given feedback on your previous answer, re-examine the image "
+              "and either correct your answer or keep it if you believe it is right.\\n\\n"
+              "Put your final answer inside <answer> tags.\\n"
+              "Example: <answer>(A)</answer>"
+          )
+
+          _FEEDBACK_CRITIC_SYSTEM_PROMPT = (
+              "You are a visual question answering verifier. "
+              "Given an image, a question, and the user's answer, "
+              "determine whether the answer is correct or incorrect. "
+              "Put your verdict inside <feedback> tags as either CORRECT or INCORRECT, "
+              "then briefly explain why.\\n"
+              "Example: <feedback>INCORRECT</feedback> The answer should be (B) "
+              "because the image shows a red car, not a blue one."
+          )
+
+          # Prefer <answer>...</answer> payload. GPT judge is disabled, so the
+          # value we return here is what VLMEvalKit scores against ground truth.
+          _ANSWER_TAG_RE = re.compile(r'<answer>\\s*(.*?)\\s*</answer>', re.IGNORECASE | re.DOTALL)
+          _LETTER_ONLY_RE = re.compile(r'^\\(?([A-D])\\)?\\s*\\.?\\s*$', re.IGNORECASE)
+
+          # Legacy fallback patterns (untagged outputs)
+          _MCQ_PATTERNS = [
+              re.compile(r'[Aa]nswer\\s*(?:is|:)\\s*\\(?([A-D])\\)?'),
+              re.compile(r'[Tt]herefore[,\\s]+.*\\(?([A-D])\\)?'),
+              re.compile(r'\\(([A-D])\\)'),
+              re.compile(r'(?:^|\\s)([A-D])\\.\\s'),
+              re.compile(r'(?:^|\\s)([A-D])(?:\\s|$|\\.|,)'),
+          ]
+
+          def _extract_mcq_letter(response):
+              # 1. Prefer content inside <answer>...</answer>
+              m = _ANSWER_TAG_RE.search(response)
+              if m:
+                  payload = m.group(1).strip()
+                  lm = _LETTER_ONLY_RE.match(payload)
+                  if lm:
+                      return lm.group(1).upper()
+                  # Non-letter payload (e.g. counting "<answer>3</answer>") —
+                  # return payload verbatim so VLMEvalKit's exact matcher sees
+                  # the clean token.
+                  return payload or response
+              # 2. No tags — fall back to legacy heuristics
+              for pat in _MCQ_PATTERNS:
+                  m = pat.search(response)
+                  if m:
+                      return m.group(1).upper()
+              return response
+
+          def Qwen2VLSelfReflectiveChat(*args, **kwargs):
+              return _Qwen2VLSelfReflectiveChat(*args, **kwargs)
+
+          class _Qwen2VLSelfReflectiveChat:
+              def __init__(self, model_path, num_turns=1, feedback_max_tokens=512,
+                           vl_system_prompt=None, critic_system_prompt=None,
+                           no_system_prompt=False, conversation_log_path=None, **kwargs):
+                  from vlmeval.vlm.qwen2_vl.model import Qwen2VLChat
+                  self.num_turns = num_turns
+                  self.feedback_max_tokens = feedback_max_tokens
+                  self.no_system_prompt = no_system_prompt
+                  self.vl_system_prompt = vl_system_prompt or _VL_ASSISTANT_SYSTEM_PROMPT_WITH_TAGS
+                  self.critic_system_prompt = critic_system_prompt or _FEEDBACK_CRITIC_SYSTEM_PROMPT
+                  self.conversation_log_path = conversation_log_path or os.environ.get(
+                      "CONVERSATION_LOG_PATH", None)
+                  self._sample_counter = 0
+                  if not no_system_prompt:
+                      kwargs.setdefault("system_prompt", self.vl_system_prompt)
+                  self._base = Qwen2VLChat(model_path=model_path, **kwargs)
+                  # Force temperature=0 for deterministic eval
+                  self._base.generate_kwargs["temperature"] = 0.0
+                  self._base.generate_kwargs["do_sample"] = False
+                  self.model_path = self._base.model_path
+                  self.INTERLEAVE = self._base.INTERLEAVE
+                  self.VIDEO_LLM = self._base.VIDEO_LLM
+                  self.INSTALL_REQ = self._base.INSTALL_REQ
+                  logger.info(f"Self-reflective wrapper: num_turns={num_turns}, no_sys={no_system_prompt}, log={self.conversation_log_path}")
+
+              def __getattr__(self, name):
+                  return getattr(self._base, name)
+
+              def generate_inner(self, message, dataset=None):
+                  initial_answer = self._base.generate_inner(message, dataset=dataset)
+                  if self.num_turns <= 0:
+                      return _extract_mcq_letter(initial_answer)
+                  image_items, question_text = self._extract_content(message, dataset)
+
+                  a1_extracted = _extract_mcq_letter(initial_answer)
+                  conversation = {
+                      "sample_id": self._sample_counter,
+                      "dataset": dataset,
+                      "question": question_text,
+                      "initial_answer": initial_answer,
+                      "a1_extracted": a1_extracted,
+                      "turns": [],
+                  }
+                  self._sample_counter += 1
+                  current_answer = initial_answer
+
+                  for turn_idx in range(self.num_turns):
+                      before_extracted = _extract_mcq_letter(current_answer)
+                      feedback = self._generate_feedback(image_items, question_text, current_answer, turn_idx, dataset)
+                      logger.info(f"Turn {turn_idx+1} feedback: {feedback[:120]}")
+                      refined = self._generate_refinement(image_items, question_text, current_answer, feedback, dataset)
+                      after_extracted = _extract_mcq_letter(refined)
+                      logger.info(f"Turn {turn_idx+1} refined: {refined[:120]}")
+                      logger.info(f"Turn {turn_idx+1} MCQ: {before_extracted} -> {after_extracted}")
+                      conversation["turns"].append({
+                          "turn": turn_idx + 1,
+                          "answer_before": current_answer,
+                          "answer_before_extracted": before_extracted,
+                          "feedback": feedback,
+                          "answer_after": refined,
+                          "answer_after_extracted": after_extracted,
+                      })
+                      current_answer = refined
+
+                  final_extracted = _extract_mcq_letter(current_answer)
+                  conversation["final_answer"] = current_answer
+                  conversation["final_extracted"] = final_extracted
+                  self._log_conversation(conversation)
+                  return final_extracted
+
+              def _log_conversation(self, conversation):
+                  if not self.conversation_log_path:
+                      return
+                  try:
+                      log_dir = os.path.dirname(self.conversation_log_path)
+                      if log_dir:
+                          os.makedirs(log_dir, exist_ok=True)
+                      with open(self.conversation_log_path, "a") as f:
+                          f.write(json.dumps(conversation, ensure_ascii=False) + "\\n")
+                  except Exception as e:
+                      logger.warning(f"Failed to write conversation log: {e}")
+
+              def _extract_content(self, message, dataset=None):
+                  image_items, text_parts = [], []
+                  for item in message:
+                      if item["type"] == "image":
+                          image_items.extend(self._base._prepare_content([item], dataset=dataset))
+                      elif item["type"] == "text":
+                          text_parts.append(item["value"])
+                  return image_items, "\\n".join(text_parts)
+
+              def _generate_multi_turn(self, messages, max_new_tokens=None, temperature=None):
+                  from qwen_vl_utils import process_vision_info
+                  text = self._base.processor.apply_chat_template(
+                      [messages], tokenize=False, add_generation_prompt=True)
+                  images, videos = process_vision_info([messages])
+                  inputs = self._base.processor(
+                      text=text, images=images, videos=videos, padding=True, return_tensors="pt")
+                  inputs = inputs.to("cuda")
+                  gen_kwargs = dict(self._base.generate_kwargs)
+                  if max_new_tokens is not None:
+                      gen_kwargs["max_new_tokens"] = max_new_tokens
+                  if temperature is not None:
+                      gen_kwargs["temperature"] = temperature
+                      gen_kwargs["do_sample"] = temperature > 0
+                  generated_ids = self._base.model.generate(**inputs, **gen_kwargs)
+                  generated_ids = [o[len(i):] for i, o in zip(inputs.input_ids, generated_ids)]
+                  return self._base.processor.tokenizer.batch_decode(
+                      generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+
+              def _generate_feedback(self, image_items, question_text, current_answer, turn_idx, dataset):
+                  messages = [
+                      {"role": "system", "content": self.critic_system_prompt},
+                      {"role": "assistant", "content": image_items + [{"type": "text", "text": question_text}]},
+                      {"role": "user", "content": current_answer},
+                  ]
+                  return self._generate_multi_turn(messages, max_new_tokens=self.feedback_max_tokens, temperature=0.0)
+
+              def _generate_refinement(self, image_items, question_text, current_answer, feedback, dataset):
+                  messages = [
+                      {"role": "system", "content": self.vl_system_prompt},
+                      {"role": "user", "content": image_items + [{"type": "text", "text": question_text}]},
+                      {"role": "assistant", "content": current_answer},
+                      {"role": "user", "content": feedback},
+                  ]
+                  return self._generate_multi_turn(messages, temperature=0.0)
+
+              def generate(self, message, dataset=None):
+                  return self._base.generate.__func__(self, message, dataset)
+
+              def use_custom_prompt(self, dataset):
+                  return self._base.use_custom_prompt(dataset)
+
+              def build_prompt(self, line, dataset=None):
+                  return self._base.build_prompt(line, dataset=dataset)
+
+              def dump_image(self, line, dataset=None):
+                  return self._base.dump_image(line, dataset=dataset)
+          '''
+          import textwrap
+          vlmevalkit_dir = os.environ.get('VLMEVALKIT_DIR', '/tmp/VLMEvalKit')
+          wrapper_path = f'{vlmevalkit_dir}/vlmeval/vlm/qwen2vl_self_reflective.py'
+          with open(wrapper_path, 'w') as f:
+              f.write(textwrap.dedent(wrapper_code))
+          print(f'Wrote self-reflective wrapper to {wrapper_path}')
+
+          # Register in config
+          model_path = os.environ['MODEL_PATH']
+          model_name = os.environ['MODEL_NAME']
+          num_turns = int(os.environ.get('NUM_TURNS', '1'))
+          no_sys = os.environ.get('NO_SYSTEM_PROMPT', '') == '1'
+          config_path = f'{vlmevalkit_dir}/vlmeval/config.py'
+          with open(config_path) as f:
+              content = f.read()
+          if f"'{model_name}'" not in content:
+              content += (
+                  f"\n# Qwen2VL model for BLINK evaluation\n"
+                  f"from vlmeval.vlm.qwen2vl_self_reflective import Qwen2VLSelfReflectiveChat\n"
+                  f"supported_VLM['{model_name}'] = partial(\n"
+                  f"    Qwen2VLSelfReflectiveChat,\n"
+                  f"    model_path='{model_path}',\n"
+                  f"    min_pixels=1003520,\n"
+                  f"    max_pixels=12845056,\n"
+                  f"    num_turns={num_turns},\n"
+                  f"    no_system_prompt={no_sys},\n"
+                  f"    use_custom_prompt=True,\n"
+                  f")\n"
+              )
+              with open(config_path, 'w') as f:
+                  f.write(content)
+              print(f"Registered '{model_name}' (num_turns={num_turns}, no_sys={no_sys})")
+          else:
+              print(f"'{model_name}' already registered")
+          WRAPPER_EOF
+
+          # Copy BLINK TSVs to ~/LMUData with short names
+          # VLMEvalKit uses dataset name in output filenames — full paths with
+          # slashes break pkl/xlsx saving. Short names avoid this.
+          mkdir -p ~/LMUData
+          BLINK_TSVS=""
+          for tsv in ${BLINK_DATA_DIR}/tsv/BLINK_*.tsv; do
+            name=$(basename "${tsv}" .tsv)
+            cp "${tsv}" ~/LMUData/"${name}.tsv"
+            BLINK_TSVS="${BLINK_TSVS} ${name}"
+          done
+          echo "Evaluating on datasets:${BLINK_TSVS}"
+          echo ""
+
+          # Run VLMEvalKit on BLINK TSVs
+          # Note: no --judge needed for BLINK — pure MCQ matching
+          echo "Starting VLMEvalKit self-reflective BLINK evaluation..."
+          echo "Each sample will do ${NUM_TURNS} feedback-refinement cycle(s)."
+          echo ""
+          torchrun --nproc-per-node=${NUM_GPUS} ${VLMEVALKIT_DIR}/run.py \
+            --data ${BLINK_TSVS} \
+            --model ${MODEL_NAME} \
+            --work-dir ${OUTPUT_DIR} \
+            --verbose
+
+          echo ""
+          echo "========================================="
+          echo "BLINK Evaluation Complete"
+          echo "========================================="
+
+          # Aggregate results
+          echo "Aggregating results..."
+          python3 /outputs/scripts/aggregate_blink_results.py \
+            --results_dir "${OUTPUT_DIR}" \
+            --model_name "${MODEL_NAME}" \
+            || echo "WARNING: Aggregation script failed — check results manually"
+
+          # Per-turn accuracy analysis (A1 vs A2)
+          if [ -f "${CONVERSATION_LOG_PATH}" ]; then
+            echo ""
+            echo "Analyzing per-turn accuracy..."
+            python3 /outputs/scripts/analyze_blink_turns.py \
+              --conversation_log "${CONVERSATION_LOG_PATH}" \
+              --blink_tsv_dir "${BLINK_DATA_DIR}/tsv" \
+              --label "${MODEL_NAME}" \
+              --output_json "${OUTPUT_DIR}/turn_analysis.json" \
+              || echo "WARNING: Turn analysis failed"
+          fi
+
+          echo "Results saved to: ${OUTPUT_DIR}"
+          ls -lhR "${OUTPUT_DIR}/"
+
+        env:
+        # HuggingFace token
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: token
+              optional: true
+
+        # Cache directories
+        - name: HF_HOME
+          value: "/cache/hf"
+        - name: TRANSFORMERS_CACHE
+          value: "/cache/hf/transformers"
+        - name: HF_DATASETS_CACHE
+          value: "/cache/hf/datasets"
+        - name: TORCH_HOME
+          value: "/cache/torch"
+
+        # Evaluation configuration
+        - name: MODEL_PATH
+          value: "/outputs/grpo_qwen_livr_v9_fixed/final"
+        - name: MODEL_NAME
+          value: "QWEN-2-5VL-livr-v9fixed-final-self-reflective-blink"
+        - name: OUTPUT_DIR
+          value: "/outputs/benchmark_results/blink_self_reflective_v9fixed_final"
+        - name: NUM_GPUS
+          value: "1"
+        - name: BLINK_DATA_DIR
+          value: "/outputs/benchmark_data/blink"
+
+        # Self-reflection parameters
+        - name: NUM_TURNS
+          value: "1"
+        - name: CONVERSATION_LOG_PATH
+          value: "/outputs/benchmark_results/blink_self_reflective_v9fixed_final/conversation_log.jsonl"
+
+        # Python and CUDA settings
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTORCH_CUDA_ALLOC_CONF
+          value: "expandable_segments:True"
+
+        resources:
+          requests:
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "3"
+          limits:
+            nvidia.com/rtxa6000: "1"
+            memory: "32Gi"
+            cpu: "3"
+
+        volumeMounts:
+        - name: outputs-volume
+          mountPath: /outputs
+        - name: cache-volume
+          mountPath: /cache
+        - name: dev-shm
+          mountPath: /dev/shm
+
+      tolerations:
+        - effect: NoSchedule
+          key: nautilus.io/hardware
+          operator: Equal
+          value: large-gpu
+        - effect: PreferNoSchedule
+          key: nvidia.com/gpu
+          operator: Exists
+        - key: nautilus.io/reservation
+          operator: Exists
+          effect: NoSchedule
+
+      volumes:
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 200Gi
+      - name: outputs-volume
+        persistentVolumeClaim:
+          claimName: ms-swift-outputs-pvc
+      - name: dev-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 8Gi

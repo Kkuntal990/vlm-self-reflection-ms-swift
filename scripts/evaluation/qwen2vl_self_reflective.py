@@ -181,12 +181,14 @@ class _Qwen2VLSelfReflectiveChat:
 
             logger.info(f"Turn {turn_idx + 1} refined: {refined_answer[:120]}")
 
-            conversation["turns"].append({
-                "turn": turn_idx + 1,
-                "answer_before": current_answer,
-                "feedback": feedback,
-                "answer_after": refined_answer,
-            })
+            conversation["turns"].append(
+                {
+                    "turn": turn_idx + 1,
+                    "answer_before": current_answer,
+                    "feedback": feedback,
+                    "answer_after": refined_answer,
+                }
+            )
 
             current_answer = refined_answer
 

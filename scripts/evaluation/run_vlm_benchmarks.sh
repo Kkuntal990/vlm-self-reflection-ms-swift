@@ -68,6 +68,8 @@ declare -A VLMEVALKIT_MAP=(
     ["hallusionbench"]="HallusionBench"
     ["llava_bench"]="LLaVA_Bench"
     ["mmhal"]="MMHal"
+    # BLINK subtasks (custom TSV — requires prepare_blink_vlmevalkit.py first)
+    ["blink"]="/outputs/benchmark_data/blink/tsv/BLINK_Art_Style.tsv /outputs/benchmark_data/blink/tsv/BLINK_Counting.tsv /outputs/benchmark_data/blink/tsv/BLINK_Forensic_Detection.tsv /outputs/benchmark_data/blink/tsv/BLINK_Functional_Correspondence.tsv /outputs/benchmark_data/blink/tsv/BLINK_IQ_Test.tsv /outputs/benchmark_data/blink/tsv/BLINK_Jigsaw.tsv /outputs/benchmark_data/blink/tsv/BLINK_Multi-view_Reasoning.tsv /outputs/benchmark_data/blink/tsv/BLINK_Object_Localization.tsv /outputs/benchmark_data/blink/tsv/BLINK_Relative_Depth.tsv /outputs/benchmark_data/blink/tsv/BLINK_Relative_Reflectance.tsv /outputs/benchmark_data/blink/tsv/BLINK_Semantic_Correspondence.tsv /outputs/benchmark_data/blink/tsv/BLINK_Spatial_Relation.tsv /outputs/benchmark_data/blink/tsv/BLINK_Visual_Correspondence.tsv /outputs/benchmark_data/blink/tsv/BLINK_Visual_Similarity.tsv"
 )
 
 declare -A LMMS_EVAL_MAP=(
@@ -83,6 +85,7 @@ declare -A LMMS_EVAL_MAP=(
     ["scienceqa"]="scienceqa_img"
     ["chartqa"]="chartqa"
     ["hallusionbench"]="hallusionbench"
+    ["blink"]="blink"
 )
 
 # ========================================

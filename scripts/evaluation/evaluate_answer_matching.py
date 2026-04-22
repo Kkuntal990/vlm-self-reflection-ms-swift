@@ -19,7 +19,7 @@ import sys
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,11 +47,11 @@ CONFIDENCE_NEEDS_REVIEW = "NEEDS_REVIEW"
 class ExtractionResult:
     """Result of extracting an answer from text."""
 
-    extracted: Optional[str]
+    extracted: str | None
     method: str  # Which regex/rule matched
     confidence: str  # HIGH or NEEDS_REVIEW
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
@@ -65,19 +65,19 @@ class SampleEvalResult:
     gt_raw: str
     initial_raw: str
     final_raw: str
-    gt_extracted: Optional[str]
+    gt_extracted: str | None
     gt_extraction_method: str
-    initial_extracted: Optional[str]
+    initial_extracted: str | None
     initial_extraction_method: str
-    final_extracted: Optional[str]
+    final_extracted: str | None
     final_extraction_method: str
-    initial_match: Optional[bool]  # None = uncertain
-    final_match: Optional[bool]
+    initial_match: bool | None  # None = uncertain
+    final_match: bool | None
     confidence: str
     review_reason: str = ""
     choices_text: str = ""  # For MCQ: the raw choices
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
@@ -86,18 +86,18 @@ class AggregateMetrics:
     """Aggregate evaluation metrics."""
 
     total_samples: int = 0
-    by_type: Dict[str, int] = field(default_factory=dict)
+    by_type: dict[str, int] = field(default_factory=dict)
     high_confidence: int = 0
     needs_review: int = 0
     initial_correct_high: int = 0
     initial_incorrect_high: int = 0
     final_correct_high: int = 0
     final_incorrect_high: int = 0
-    by_type_high_initial: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    by_type_high_final: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    transitions_high: Dict[str, int] = field(default_factory=dict)
+    by_type_high_initial: dict[str, dict[str, int]] = field(default_factory=dict)
+    by_type_high_final: dict[str, dict[str, int]] = field(default_factory=dict)
+    transitions_high: dict[str, int] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 
@@ -126,7 +126,7 @@ def classify_question(question: str) -> str:
         return "FREE_FORM"
 
 
-def extract_choices(question: str) -> Dict[str, str]:
+def extract_choices(question: str) -> dict[str, str]:
     """Extract MCQ choices from question text.
 
     Handles both formats:
@@ -142,9 +142,7 @@ def extract_choices(question: str) -> Dict[str, str]:
     choices = {}
 
     # Format 1: (A) text
-    for m in re.finditer(
-        r"\(([A-H])\)\s*(.+?)(?=\s*\([A-H]\)|$)", question, re.DOTALL
-    ):
+    for m in re.finditer(r"\(([A-H])\)\s*(.+?)(?=\s*\([A-H]\)|$)", question, re.DOTALL):
         letter = m.group(1)
         text = m.group(2).strip().rstrip("\n").strip()
         choices[letter] = text
@@ -250,9 +248,7 @@ def extract_mcq_from_model(answer: str) -> ExtractionResult:
     return ExtractionResult(None, "no_match", CONFIDENCE_NEEDS_REVIEW)
 
 
-def extract_mcq_from_gt(
-    gt: str, choices: Dict[str, str]
-) -> ExtractionResult:
+def extract_mcq_from_gt(gt: str, choices: dict[str, str]) -> ExtractionResult:
     """Extract option letter from GT answer.
 
     Args:
@@ -311,13 +307,9 @@ def extract_mcq_from_gt(
     # 8. Embedded standalone letter (not part of a word)
     letters_found = re.findall(r"\b([A-H])\b", gt_stripped)
     # Filter out common English words that are single letters (A, I)
-    meaningful = [
-        l for l in letters_found if l in choices
-    ]
+    meaningful = [letter for letter in letters_found if letter in choices]
     if len(meaningful) == 1:
-        return ExtractionResult(
-            meaningful[0], "embedded_letter", CONFIDENCE_NEEDS_REVIEW
-        )
+        return ExtractionResult(meaningful[0], "embedded_letter", CONFIDENCE_NEEDS_REVIEW)
 
     # 9. GT is a value — match against choice text (handles 2000+ cases)
     best_match = _match_gt_value_to_choice(gt_stripped, choices)
@@ -328,9 +320,7 @@ def extract_mcq_from_gt(
     return ExtractionResult(None, "no_match", CONFIDENCE_NEEDS_REVIEW)
 
 
-def _match_gt_value_to_choice(
-    gt_value: str, choices: Dict[str, str]
-) -> Optional[Tuple[str, str]]:
+def _match_gt_value_to_choice(gt_value: str, choices: dict[str, str]) -> tuple[str, str] | None:
     """Match a GT answer value against MCQ choice values.
 
     Args:
@@ -493,7 +483,9 @@ def extract_number(text: str, allow_float: bool = True) -> ExtractionResult:
         val = numbers[-1].replace(",", "")
         # Confidence based on how many numbers exist and text length
         # Short text or few numbers → HIGH confidence the last number is the answer
-        confidence = CONFIDENCE_HIGH if len(numbers) <= 5 or len(text) < 200 else CONFIDENCE_NEEDS_REVIEW
+        confidence = (
+            CONFIDENCE_HIGH if len(numbers) <= 5 or len(text) < 200 else CONFIDENCE_NEEDS_REVIEW
+        )
         return ExtractionResult(val, "last_number", confidence)
 
     return ExtractionResult(None, "no_match", CONFIDENCE_NEEDS_REVIEW)
@@ -580,7 +572,9 @@ def extract_freeform(text: str) -> ExtractionResult:
                     "last_sentence_number",
                     CONFIDENCE_HIGH,
                 )
-            return ExtractionResult(last.lower().strip(".,;:!? "), "last_sentence", CONFIDENCE_NEEDS_REVIEW)
+            return ExtractionResult(
+                last.lower().strip(".,;:!? "), "last_sentence", CONFIDENCE_NEEDS_REVIEW
+            )
 
     return ExtractionResult(None, "no_match", CONFIDENCE_NEEDS_REVIEW)
 
@@ -619,9 +613,7 @@ def normalize_expression(expr: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def numbers_match(
-    a: str, b: str, rel_tol: float = 0.005, abs_tol: float = 0.01
-) -> Optional[bool]:
+def numbers_match(a: str, b: str, rel_tol: float = 0.005, abs_tol: float = 0.01) -> bool | None:
     """Compare two number strings with tolerance.
 
     Uses exact match for integers, tolerance for floats.
@@ -676,9 +668,8 @@ def strings_match(a: str, b: str) -> bool:
     if a_norm == b_norm:
         return True
     # Check containment for short answers
-    if len(a_norm) > 2 and len(b_norm) > 2:
-        if a_norm in b_norm or b_norm in a_norm:
-            return True
+    if len(a_norm) > 2 and len(b_norm) > 2 and (a_norm in b_norm or b_norm in a_norm):
+        return True
     # Check word-level overlap for longer answers
     a_words = set(a_clean.split())
     b_words = set(b_clean.split())
@@ -726,7 +717,7 @@ def match_answers(
     model_ext: ExtractionResult,
     gt_ext: ExtractionResult,
     question_type: str,
-) -> Tuple[Optional[bool], str]:
+) -> tuple[bool | None, str]:
     """Compare extracted model and GT answers.
 
     Args:
@@ -759,7 +750,10 @@ def match_answers(
         ):
             match = m_val.upper() == g_val.upper()
             conf = CONFIDENCE_HIGH
-            if model_ext.confidence == CONFIDENCE_NEEDS_REVIEW or gt_ext.confidence == CONFIDENCE_NEEDS_REVIEW:
+            if (
+                model_ext.confidence == CONFIDENCE_NEEDS_REVIEW
+                or gt_ext.confidence == CONFIDENCE_NEEDS_REVIEW
+            ):
                 conf = CONFIDENCE_NEEDS_REVIEW
             return match, conf
         # One or both are values → needs review (value comparison happened at extraction)
@@ -770,7 +764,10 @@ def match_answers(
         if result is None:
             return None, CONFIDENCE_NEEDS_REVIEW
         conf = CONFIDENCE_HIGH
-        if model_ext.confidence == CONFIDENCE_NEEDS_REVIEW or gt_ext.confidence == CONFIDENCE_NEEDS_REVIEW:
+        if (
+            model_ext.confidence == CONFIDENCE_NEEDS_REVIEW
+            or gt_ext.confidence == CONFIDENCE_NEEDS_REVIEW
+        ):
             conf = CONFIDENCE_NEEDS_REVIEW
         return result, conf
 
@@ -791,7 +788,10 @@ def match_answers(
         num_result = numbers_match(m_val, g_val)
         if num_result is not None:
             conf = CONFIDENCE_HIGH
-            if model_ext.confidence == CONFIDENCE_NEEDS_REVIEW or gt_ext.confidence == CONFIDENCE_NEEDS_REVIEW:
+            if (
+                model_ext.confidence == CONFIDENCE_NEEDS_REVIEW
+                or gt_ext.confidence == CONFIDENCE_NEEDS_REVIEW
+            ):
                 conf = CONFIDENCE_NEEDS_REVIEW
             return num_result, conf
 
@@ -802,7 +802,7 @@ def match_answers(
         return False, CONFIDENCE_NEEDS_REVIEW
 
 
-def _extract_yes_no(text: str) -> Optional[str]:
+def _extract_yes_no(text: str) -> str | None:
     """Extract yes/no from text if it's clearly a yes/no answer.
 
     Args:
@@ -820,7 +820,7 @@ def _extract_yes_no(text: str) -> Optional[str]:
     return None
 
 
-def _infer_yes_no_from_text(text: str) -> Optional[str]:
+def _infer_yes_no_from_text(text: str) -> str | None:
     """Infer yes/no from descriptive text.
 
     Args:
@@ -832,9 +832,18 @@ def _infer_yes_no_from_text(text: str) -> Optional[str]:
     text_lower = text.strip().lower()
     # Strong negative signals
     neg_patterns = [
-        r"\bnot\b", r"\bno\b", r"\bdon'?t\b", r"\bdoesn'?t\b",
-        r"\bisn'?t\b", r"\baren'?t\b", r"\bwasn'?t\b", r"\bweren'?t\b",
-        r"\bnone\b", r"\bneither\b", r"\bcannot\b", r"\bcan'?t\b",
+        r"\bnot\b",
+        r"\bno\b",
+        r"\bdon'?t\b",
+        r"\bdoesn'?t\b",
+        r"\bisn'?t\b",
+        r"\baren'?t\b",
+        r"\bwasn'?t\b",
+        r"\bweren'?t\b",
+        r"\bnone\b",
+        r"\bneither\b",
+        r"\bcannot\b",
+        r"\bcan'?t\b",
     ]
     for pat in neg_patterns:
         if re.search(pat, text_lower):
@@ -847,7 +856,7 @@ def _infer_yes_no_from_text(text: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def evaluate_sample(sample: Dict) -> SampleEvalResult:
+def evaluate_sample(sample: dict) -> SampleEvalResult:
     """Evaluate a single sample.
 
     Args:
@@ -885,7 +894,9 @@ def evaluate_sample(sample: Dict) -> SampleEvalResult:
         if final_ext.extracted is None and choices:
             val_match = _match_gt_value_to_choice(final_raw[-300:], choices)
             if val_match is not None:
-                final_ext = ExtractionResult(val_match[0], f"model_value_{val_match[1]}", CONFIDENCE_NEEDS_REVIEW)
+                final_ext = ExtractionResult(
+                    val_match[0], f"model_value_{val_match[1]}", CONFIDENCE_NEEDS_REVIEW
+                )
     elif q_type == "INTEGER":
         final_ext = extract_number(final_raw, allow_float=False)
     elif q_type == "FLOAT":
@@ -899,7 +910,9 @@ def evaluate_sample(sample: Dict) -> SampleEvalResult:
         if initial_ext.extracted is None and choices:
             val_match = _match_gt_value_to_choice(initial_raw[-300:], choices)
             if val_match is not None:
-                initial_ext = ExtractionResult(val_match[0], f"model_value_{val_match[1]}", CONFIDENCE_NEEDS_REVIEW)
+                initial_ext = ExtractionResult(
+                    val_match[0], f"model_value_{val_match[1]}", CONFIDENCE_NEEDS_REVIEW
+                )
     elif q_type == "INTEGER":
         initial_ext = extract_number(initial_raw, allow_float=False)
     elif q_type == "FLOAT":
@@ -956,7 +969,7 @@ def evaluate_sample(sample: Dict) -> SampleEvalResult:
 # ---------------------------------------------------------------------------
 
 
-def compute_metrics(results: List[SampleEvalResult]) -> AggregateMetrics:
+def compute_metrics(results: list[SampleEvalResult]) -> AggregateMetrics:
     """Compute aggregate metrics from results.
 
     Args:
@@ -1016,7 +1029,7 @@ def compute_metrics(results: List[SampleEvalResult]) -> AggregateMetrics:
 # ---------------------------------------------------------------------------
 
 
-def load_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
+def load_dataset(dataset_path: str, max_samples: int = 0) -> list[dict]:
     """Load dataset from JSONL file.
 
     Args:
@@ -1027,7 +1040,7 @@ def load_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
         List of sample dictionaries.
     """
     samples = []
-    with open(dataset_path, "r") as f:
+    with open(dataset_path) as f:
         for i, line in enumerate(f):
             if max_samples > 0 and i >= max_samples:
                 break
@@ -1041,7 +1054,7 @@ def load_dataset(dataset_path: str, max_samples: int = 0) -> List[Dict]:
 
 
 def save_results(
-    results: List[SampleEvalResult],
+    results: list[SampleEvalResult],
     metrics: AggregateMetrics,
     output_dir: Path,
 ) -> None:
@@ -1088,7 +1101,7 @@ def save_results(
     logger.info(f"Saved metrics to {metrics_path}")
 
     # Summary extraction method stats
-    method_stats: Dict[str, Counter] = {
+    method_stats: dict[str, Counter] = {
         "gt": Counter(),
         "initial": Counter(),
         "final": Counter(),
@@ -1155,8 +1168,12 @@ def main() -> None:
     logger.info("EVALUATION SUMMARY")
     logger.info("=" * 60)
     logger.info(f"Total samples: {metrics.total_samples}")
-    logger.info(f"HIGH confidence: {metrics.high_confidence} ({100*metrics.high_confidence/metrics.total_samples:.1f}%)")
-    logger.info(f"NEEDS_REVIEW: {metrics.needs_review} ({100*metrics.needs_review/metrics.total_samples:.1f}%)")
+    logger.info(
+        f"HIGH confidence: {metrics.high_confidence} ({100 * metrics.high_confidence / metrics.total_samples:.1f}%)"
+    )
+    logger.info(
+        f"NEEDS_REVIEW: {metrics.needs_review} ({100 * metrics.needs_review / metrics.total_samples:.1f}%)"
+    )
     logger.info("")
     logger.info("By question type:")
     for qt in QUESTION_TYPES:
@@ -1166,8 +1183,12 @@ def main() -> None:
     logger.info("HIGH confidence results (preliminary, pending Opus verification):")
     total_high = metrics.high_confidence
     if total_high > 0:
-        logger.info(f"  Initial accuracy: {metrics.initial_correct_high}/{total_high} = {100*metrics.initial_correct_high/total_high:.1f}%")
-        logger.info(f"  Final accuracy:   {metrics.final_correct_high}/{total_high} = {100*metrics.final_correct_high/total_high:.1f}%")
+        logger.info(
+            f"  Initial accuracy: {metrics.initial_correct_high}/{total_high} = {100 * metrics.initial_correct_high / total_high:.1f}%"
+        )
+        logger.info(
+            f"  Final accuracy:   {metrics.final_correct_high}/{total_high} = {100 * metrics.final_correct_high / total_high:.1f}%"
+        )
     logger.info("")
     logger.info("Transitions (high confidence only):")
     for k, v in sorted(metrics.transitions_high.items()):

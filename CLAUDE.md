@@ -317,27 +317,93 @@ kubectl exec -it $POD_NAME -- ls -lh /outputs/
 kubectl cp $POD_NAME:/outputs/ ./local-outputs/
 ```
 
-## Key Files
+## Repository Layout
 
-### Scripts
+Each file's one-line purpose. See the file's top-of-module docstring for full details.
 
-- [scripts/training/run_full_sft_qwen3vl_fire_8gpu.sh](scripts/training/run_full_sft_qwen3vl_fire_8gpu.sh) - 8-GPU full fine-tuning
-- [scripts/data_prep/prepare_fire_sharegpt.py](scripts/data_prep/prepare_fire_sharegpt.py) - FIRE dataset preprocessing
-- [scripts/training/env.sh](scripts/training/env.sh) - Environment configuration
-- [scripts/evaluation/evaluate_self_refinement.py](scripts/evaluation/evaluate_self_refinement.py) - Evaluation pipeline
+### `scripts/data_prep/` — dataset preprocessing
 
-### Kubernetes Jobs
+| File | Purpose |
+| ---- | ------- |
+| `analyze_dataset_lengths.py` | Token-length statistics for FIRE ShareGPT to pick `max_length`. |
+| `categorize_fire_samples.py` | Classify FIRE samples by answer type (MCQ / yes-no / open). |
+| `prepare_fire_feedback_with_thought.py` | Inject original Thought+Answer into FIRE feedback user turns. |
+| `prepare_fire_with_mappings.py` | Build FIRE ShareGPT JSONL with local image-path mappings. |
+| `prepare_fire_with_thought.py` | FIRE ShareGPT JSONL preserving Thought+Answer in assistant turns. |
+| `prepare_grpo_mcq_yesno.py` | Build MCQ/Yes-No GRPO training set from PixelReasoner/MME-CoT/RLAIF-V/VISCO. |
+| `prepare_lvlm_nlf.py` | Convert LVLM_NLF into ms-swift messages format. |
+| `prepare_volcano_sharegpt.py` | Convert Volcano dataset into ShareGPT format. |
+| `prepare_vqa_mix.py` | Build a balanced VQA mix with format-specific system prompts. |
+| `verify_fire_images.py` | Check that referenced FIRE images exist on the pod. |
 
-- [k8s/job-preprocess-fire-cpu.yaml](k8s/job-preprocess-fire-cpu.yaml) - CPU preprocessing
-- [k8s/job-full-sft-qwen3vl-fire-8gpu.yaml](k8s/job-full-sft-qwen3vl-fire-8gpu.yaml) - 8-GPU training
-- [k8s/jupyter-2gpu-test.yaml](k8s/jupyter-2gpu-test.yaml) - Interactive dev pod
+### `scripts/training/` — training entry points
 
-### Container
+| File | Purpose |
+| ---- | ------- |
+| `env.sh` | Shared training environment variables (paths, tokens, NCCL). |
+| `training_env.sh` | Alternate env file used by some job yamls. |
+| `run_full_sft_qwen3vl_fire_8gpu.sh` | 8-GPU full fine-tune of Qwen VL on FIRE. |
+| `run_full_sft_qwen3vl_fire_multinode.sh` | Multinode variant of the 8-GPU full SFT. |
+| `run_lora_sft_qwen25vl.sh` | LoRA SFT for Qwen2.5-VL. |
+| `run_sft_single_gpu.sh` | Single-GPU SFT for local smoke tests. |
 
-- [Dockerfile.base](Dockerfile.base) - Base image (CUDA 12.1, PyTorch 2.2.0)
-- [Dockerfile](Dockerfile) - App image (ms-swift + scripts)
-- [build_base.sh](build_base.sh) - Build base image
-- [build_main.sh](build_main.sh) - Build app image
+### `scripts/evaluation/` — inference, judges, benchmark runners
+
+| File | Purpose |
+| ---- | ------- |
+| `run_vlm_benchmarks.sh` | Top-level driver for VLMEvalKit benchmarks (BLINK, HallusionBench, …). |
+| `run_llava_ov_benchmarks.sh` | Driver for LLaVA-OneVision lmms-eval benchmarks. |
+| `prepare_blink_vlmevalkit.py` | Convert BLINK HF dataset into VLMEvalKit TSV format. |
+| `aggregate_blink_results.py` | Aggregate per-subtask BLINK CSVs into a summary. |
+| `analyze_blink_turns.py` | Per-turn accuracy analysis of BLINK self-reflective logs. |
+| `register_vlmevalkit_model.py` | Register a fine-tuned checkpoint in VLMEvalKit config. |
+| `qwen2vl_self_reflective.py` | VLMEvalKit wrapper for Qwen2.5-VL self-reflective inference. |
+| `llava_hf_wrapper.py` | VLMEvalKit wrapper for HF-format LLaVA-1.5 checkpoints. |
+| `self_reflective_inference_v2.py` | Multi-turn self-reflective inference loop with natural roles. |
+| `generate_refinements.py` | Generate self-refinement responses from a fine-tuned VLM. |
+| `evaluate_self_refinement.py` | Score refinements via reward model and/or VLM judge. |
+| `evaluate_answer_matching.py` | Extract + match final answers against ground truth. |
+| `analyze_refinement_metrics.py` | Compute and plot self-refinement metrics. |
+| `compare_benchmark_results.py` | Cross-framework / cross-model benchmark comparison. |
+| `score_with_reward_model.py` | Score responses with Skywork-VL-Reward-7B. |
+| `vlm_judge.py` | Generic VLM-as-judge interface used by evaluations. |
+| `judges/llava_critic_r1.py` | LLaVA-Critic-R1 judge implementation. |
+| `eval_llava_ov_lmms.py` | LLaVA-OneVision evaluation via lmms-eval + HF transformers. |
+| `run_lmms_eval_patched.py` | lmms-eval launcher with LLaVA-NeXT compatibility patches. |
+| `verify_dataset_alignment.py` | Spot-check dataset/image alignment against ground truth. |
+
+### `scripts/run_inference.py`
+
+ms-swift-compatible inference entry point for VLM self-refinement.
+
+### `k8s/` — Kubernetes manifests
+
+- `pvc-*.yaml`, `secret-hf-token.yaml.template` — cluster storage and secrets.
+- `pytorchjob-full-sft-qwen2-5vl-fire-8gpu.yaml`, `job-full-*.yaml`, `job-lora-*.yaml` — training jobs (full SFT / LoRA, single- and multi-turn variants).
+- `job-prepare-grpo-mcq-yesno.yaml`, `job-upload-fire-images-hf.yaml` — data prep jobs.
+- `job-eval-vlmevalkit-*.yaml` — VLMEvalKit eval jobs (base, self-reflective, GRPO, BLINK, hallu, thought, LLaVA). One file per experiment variant.
+- `job-eval-lmms-eval.yaml`, `job-eval-llava-ov-lmms.yaml` — lmms-eval jobs.
+- `job-evaluate-self-refinement*.yaml`, `job-run-inference.yaml` — self-refinement inference / evaluation jobs.
+- `jupyter-1gpu-test.yaml`, `pod-temp-cpu.yaml` — interactive dev pods.
+
+### `docs/`
+
+`DATASETS.md`, `DOCKER_BUILD.md`, `EVALUATION.md`, `EVAL_ANSWER_MATCHING.md`, `GHCR_SETUP.md`, `K8S_DEPLOY.md`, `QUICKSTART.md` — topic-specific guides.
+
+### `eval_ground_truth/`
+
+Reference evaluation outputs (`aggregate_metrics.json`, `evaluation_report.txt`, `sample_results.jsonl`) used for regression comparison.
+
+### Container & build
+
+| File | Purpose |
+| ---- | ------- |
+| `Dockerfile.base` | Base image (CUDA 12.1, PyTorch 2.2.0). |
+| `Dockerfile` | App image on top of base (ms-swift + scripts). |
+| `build_base.sh` | Build and push the base image. |
+| `build_main.sh` | Build and push the app image. |
+| `pyproject.toml`, `requirements.txt`, `uv.lock` | Python deps (uv-managed). |
+| `ruff.toml` | Lint/format config. |
 
 ## Configuration
 

@@ -1808,8 +1808,7 @@ def main():
 
             if not all_done:
                 logger.error(
-                    f"Timed out waiting for all ranks after {max_wait}s. "
-                    "Merging available results."
+                    f"Timed out waiting for all ranks after {max_wait}s. Merging available results."
                 )
 
             # Merge results

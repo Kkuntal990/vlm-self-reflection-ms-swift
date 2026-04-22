@@ -66,7 +66,9 @@ def _make_fallback_stubs() -> dict:
                 b = layer.bias[index].clone().detach()
         new_size = list(layer.weight.size())
         new_size[dim] = len(index)
-        new_layer = torch.nn.Linear(new_size[1], new_size[0], bias=layer.bias is not None).to(layer.weight.device)
+        new_layer = torch.nn.Linear(new_size[1], new_size[0], bias=layer.bias is not None).to(
+            layer.weight.device
+        )
         new_layer.weight.requires_grad = False
         new_layer.weight.copy_(W.contiguous())
         new_layer.weight.requires_grad = True
@@ -156,9 +158,7 @@ def patch_llava_builder() -> None:
     def _patched_load_pretrained_model(
         model_path, model_base, model_name, device_map="auto", **kwargs
     ):
-        import json
         import logging
-        import os
 
         import torch
         from transformers import AutoConfig
@@ -171,8 +171,8 @@ def patch_llava_builder() -> None:
 
         if model_type == "llava_onevision":
             logger.info(
-                f"Detected HF-native llava_onevision checkpoint, "
-                f"loading with LlavaOnevisionForConditionalGeneration"
+                "Detected HF-native llava_onevision checkpoint, "
+                "loading with LlavaOnevisionForConditionalGeneration"
             )
             from transformers import (
                 AutoProcessor,

@@ -11,8 +11,9 @@ Usage:
 """
 
 import torch
-from vlmeval.vlm.base import BaseModel
 from vlmeval.smp import get_logger
+from vlmeval.vlm.base import BaseModel
+
 
 logger = get_logger("LLaVA_HF")
 
@@ -23,7 +24,9 @@ class LLaVA_HF(BaseModel):
     INSTALL_REQ = False
     INTERLEAVE = False
 
-    def __init__(self, model_path: str, base_model_path: str = "", system_prompt: str = "", **kwargs) -> None:
+    def __init__(
+        self, model_path: str, base_model_path: str = "", system_prompt: str = "", **kwargs
+    ) -> None:
         """Initialize the LLaVA-HF model.
 
         Args:
@@ -45,6 +48,7 @@ class LLaVA_HF(BaseModel):
         attn_kwargs = {}
         try:
             import flash_attn  # noqa: F401
+
             attn_kwargs["attn_implementation"] = "flash_attention_2"
         except ImportError:
             pass
@@ -76,13 +80,13 @@ class LLaVA_HF(BaseModel):
         model = model.eval()
         self.model = model.cuda()
 
-        kwargs_default = dict(
-            do_sample=False,
-            temperature=0,
-            max_new_tokens=2048,
-            top_p=None,
-            num_beams=1,
-        )
+        kwargs_default = {
+            "do_sample": False,
+            "temperature": 0,
+            "max_new_tokens": 2048,
+            "top_p": None,
+            "num_beams": 1,
+        }
         kwargs_default.update(kwargs)
         self.kwargs = kwargs_default
 
@@ -115,21 +119,21 @@ class LLaVA_HF(BaseModel):
         # Format as conversation for LLaVA-1.5
         conversation = []
         if self.system_prompt:
-            conversation.append({
-                "role": "system",
-                "content": [{"type": "text", "text": self.system_prompt}],
-            })
-        conversation.append({
-            "role": "user",
-            "content": [
-                {"type": "image"} for _ in images
-            ]
-            + [{"type": "text", "text": prompt.replace("<image>", "").strip()}],
-        })
-
-        text_prompt = self.processor.apply_chat_template(
-            conversation, add_generation_prompt=True
+            conversation.append(
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": self.system_prompt}],
+                }
+            )
+        conversation.append(
+            {
+                "role": "user",
+                "content": [{"type": "image"} for _ in images]
+                + [{"type": "text", "text": prompt.replace("<image>", "").strip()}],
+            }
         )
+
+        text_prompt = self.processor.apply_chat_template(conversation, add_generation_prompt=True)
 
         if images:
             inputs = self.processor(

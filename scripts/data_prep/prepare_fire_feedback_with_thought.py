@@ -20,11 +20,13 @@ import os
 import sys
 from pathlib import Path
 
+
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 
 from datasets import load_dataset
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -219,7 +221,8 @@ def main() -> None:
     input_path = Path(args.input_file)
     output_path = Path(args.output_file)
 
-    total_lines = sum(1 for _ in open(input_path))
+    with open(input_path) as f_count:
+        total_lines = sum(1 for _ in f_count)
     if args.max_samples > 0:
         total_lines = min(args.max_samples, total_lines)
 
@@ -231,7 +234,7 @@ def main() -> None:
     }
 
     with open(input_path) as f_in, open(output_path, "w") as f_out:
-        for line_idx in tqdm(range(total_lines), desc="Processing"):
+        for _ in tqdm(range(total_lines), desc="Processing"):
             line = f_in.readline()
             sample = json.loads(line)
 
@@ -263,11 +266,10 @@ def main() -> None:
             # Replace user messages with full thought+answer
             response_idx = 0
             for msg in sample["messages"]:
-                if msg["role"] == "user":
-                    if response_idx < len(responses):
-                        msg["content"] = responses[response_idx]
-                        stats["user_messages_replaced"] += 1
-                        response_idx += 1
+                if msg["role"] == "user" and response_idx < len(responses):
+                    msg["content"] = responses[response_idx]
+                    stats["user_messages_replaced"] += 1
+                    response_idx += 1
 
             f_out.write(json.dumps(sample, ensure_ascii=False) + "\n")
 

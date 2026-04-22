@@ -25,11 +25,13 @@ import os
 import sys
 from pathlib import Path
 
+
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "600")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "60")
 
 from datasets import load_dataset
 from tqdm import tqdm
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,9 +63,7 @@ LAST_RESPONSE_SYSTEM_PROMPT = (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Prepare FIRE dataset with image path mappings"
-    )
+    parser = argparse.ArgumentParser(description="Prepare FIRE dataset with image path mappings")
     parser.add_argument(
         "--output_dir",
         type=str,
@@ -250,23 +250,29 @@ def create_messages_format(
     messages = []
 
     # System message
-    messages.append({
-        "role": "system",
-        "content": system_prompt,
-    })
+    messages.append(
+        {
+            "role": "system",
+            "content": system_prompt,
+        }
+    )
 
     # First user message with question (includes <image> tag from FIRE)
-    messages.append({
-        "role": "user",
-        "content": parsed["question"],
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": parsed["question"],
+        }
+    )
 
     # First assistant response
-    messages.append({
-        "role": "assistant",
-        "content": parsed["rounds"][0]["answer"],
-        "loss": True,
-    })
+    messages.append(
+        {
+            "role": "assistant",
+            "content": parsed["rounds"][0]["answer"],
+            "loss": True,
+        }
+    )
 
     # Subsequent feedback -> refined answer exchanges
     for i in range(1, len(parsed["rounds"])):
@@ -275,16 +281,20 @@ def create_messages_format(
 
         if prev_feedback:
             # User provides feedback
-            messages.append({
-                "role": "user",
-                "content": prev_feedback,
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": prev_feedback,
+                }
+            )
             # Assistant provides refined answer
-            messages.append({
-                "role": "assistant",
-                "content": current_answer,
-                "loss": True,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": current_answer,
+                    "loss": True,
+                }
+            )
 
     return {
         "messages": messages,
@@ -316,17 +326,21 @@ def create_feedback_format(
     messages = []
 
     # System message
-    messages.append({
-        "role": "system",
-        "content": system_prompt,
-    })
+    messages.append(
+        {
+            "role": "system",
+            "content": system_prompt,
+        }
+    )
 
     # Assistant asks the question (no loss)
-    messages.append({
-        "role": "assistant",
-        "content": parsed["question"],
-        "loss": False,
-    })
+    messages.append(
+        {
+            "role": "assistant",
+            "content": parsed["question"],
+            "loss": False,
+        }
+    )
 
     # Process each round: user provides answer, assistant provides feedback
     for round_data in parsed["rounds"]:
@@ -334,18 +348,22 @@ def create_feedback_format(
         feedback = round_data["feedback"]
 
         # User provides answer
-        messages.append({
-            "role": "user",
-            "content": answer,
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": answer,
+            }
+        )
 
         # Assistant provides feedback (if available)
         if feedback:
-            messages.append({
-                "role": "assistant",
-                "content": feedback,
-                "loss": True,
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": feedback,
+                    "loss": True,
+                }
+            )
 
     return {
         "messages": messages,
@@ -475,7 +493,9 @@ def process_split(
             # Create output formats with format-specific prompts
             messages_data = create_messages_format(parsed, actual_image_path, messages_prompt)
             feedback_data = create_feedback_format(parsed, actual_image_path, feedback_prompt)
-            last_response_data = create_last_response_format(parsed, actual_image_path, last_response_prompt)
+            last_response_data = create_last_response_format(
+                parsed, actual_image_path, last_response_prompt
+            )
 
             # Write to files
             f_messages.write(json.dumps(messages_data, ensure_ascii=False) + "\n")
