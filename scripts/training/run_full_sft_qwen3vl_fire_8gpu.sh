@@ -175,8 +175,8 @@ swift sft \
     --save_total_limit "${SAVE_TOTAL_LIMIT}" \
     --use_hf true \
     --gradient_checkpointing true \
-    --freeze_vit true \
-    --freeze_aligner true \
+    --freeze_vit "${FREEZE_VIT:-true}" \
+    --freeze_aligner "${FREEZE_ALIGNER:-true}" \
     --dataloader_num_workers 4 \
     --dataset_num_proc 4 \
     --save_only_model true \
